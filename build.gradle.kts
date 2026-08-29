@@ -14,14 +14,6 @@ android {
         versionCode = 1
         versionName = "1.0"
     }
-
-    sourceSets {
-        getByName("main") {
-            manifest.srcFile("app/src/main/app/src/main/app/src/app/src/main/Androidmanifest.xml")
-            java.srcDirs("app/src/main/app/src/main/app/src/app/src/main/app/src/main/java")
-            res.srcDirs("app/src/main/app/src/main/app/src/app/src/main/app/src/main/res")
-        }
-    }
 }
 
 dependencies {
