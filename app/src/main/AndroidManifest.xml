@@ -6,7 +6,7 @@
         android:label="Trading Signal">
 
         <activity
-            android:name=".MainScreen"
+            android:name=".MainActivity"
             android:exported="true">
 
             <intent-filter>
