@@ -24,8 +24,8 @@ private val markets = listOf(
     Market("GBP/USD", "GBP/USD", R.id.gbpPrice, R.id.gbpSignal),
     Market("BTC/USD", "BTC/USD", R.id.btcPrice, R.id.btcSignal),
     Market("XAU/USD", "XAU/USD", R.id.goldPrice, R.id.goldSignal),
-    Market("USTEC", "NASDAQ", R.id.ustecPrice, R.id.ustecSignal),
-    Market("USOIL", "WTI", R.id.usoilPrice, R.id.usoilSignal)
+    Market("USTEC", "NDX", R.id.ustecPrice, R.id.ustecSignal),
+    Market("USOIL", "WTI/USD", R.id.usoilPrice, R.id.usoilSignal)
 )
 
 override fun onCreate(savedInstanceState: Bundle?) {
@@ -63,8 +63,8 @@ private fun loadPrice(market: Market) {
 
             val url =
                 "https://api.twelvedata.com/price" +
-                "?symbol=${market.symbol}" +
-                "&apikey=$apiKey"
+                        "?symbol=${market.symbol}" +
+                        "&apikey=$apiKey"
 
             val request = Request.Builder()
                 .url(url)
@@ -75,12 +75,12 @@ private fun loadPrice(market: Market) {
 
                 val body = response.body?.string() ?: ""
 
-                if (!response.isSuccessful) {
-                    showError(market, "HTTP ${response.code}")
+                val json = try {
+                    JSONObject(body)
+                } catch (e: Exception) {
+                    showError(market, "Invalid API response")
                     return@use
                 }
-
-                val json = JSONObject(body)
 
                 if (json.has("price")) {
 
@@ -99,20 +99,23 @@ private fun loadPrice(market: Market) {
 
                 } else {
 
-                    showError(
-                        market,
-                        json.optString(
-                            "message",
-                            "Data unavailable"
-                        )
+                    val message = json.optString(
+                        "message",
+                        "Symbol unavailable"
                     )
+
+                    showError(market, message)
                 }
             }
 
         } catch (e: Exception) {
 
-            showError(market, "Connection error")
+            showError(
+                market,
+                "Connection error"
+            )
         }
+
     }.start()
 }
 
