@@ -8,434 +8,446 @@ import android.widget.TextView
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity() {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .build()
+private val client = OkHttpClient.Builder()
+    .connectTimeout(15, TimeUnit.SECONDS)
+    .readTimeout(15, TimeUnit.SECONDS)
+    .build()
 
-    private val handler = Handler(Looper.getMainLooper())
+private val handler = Handler(Looper.getMainLooper())
 
-    /*
-     * এখন শুধু BTC/USD এবং XAU/USD
-     */
-    private val markets = listOf(
-        Market(
-            "BTC/USD",
-            "BTC/USD",
-            R.id.btcPrice,
-            R.id.btcSignal
-        ),
-
-        Market(
-            "XAU/USD",
-            "XAU/USD",
-            R.id.goldPrice,
-            R.id.goldSignal
-        )
+/*
+ * আপাতত BTC/USD এবং XAU/USD
+ */
+private val markets = listOf(
+    Market(
+        "BTC/USD",
+        "BTC/USD",
+        R.id.btcPrice,
+        R.id.btcSignal
+    ),
+    Market(
+        "XAU/USD",
+        "XAU/USD",
+        R.id.goldPrice,
+        R.id.goldSignal
     )
+)
 
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
+override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
 
-        setContentView(R.layout.activity_main)
+    setContentView(R.layout.activity_main)
 
-        loadAllMarkets()
+    loadAllMarkets()
+}
+
+/*
+ * সব market load
+ */
+private fun loadAllMarkets() {
+
+    for (market in markets) {
+        loadMarketData(market)
     }
 
     /*
-     * সব market update
+     * প্রতি ১ মিনিটে update
      */
-    private fun loadAllMarkets() {
+    handler.postDelayed(object : Runnable {
 
-        for (market in markets) {
-            loadMarketData(market)
+        override fun run() {
+
+            loadAllMarkets()
+
+            handler.postDelayed(this, 60_000)
         }
 
-        /*
-         * প্রতি ১ মিনিটে update
-         */
-        handler.postDelayed(object : Runnable {
+    }, 60_000)
+}
 
-            override fun run() {
+/*
+ * Twelve Data থেকে 1-minute candles
+ */
+private fun loadMarketData(market: Market) {
 
-                loadAllMarkets()
+    Thread {
 
-                handler.postDelayed(this, 60_000)
+        try {
+
+            val apiKey =
+                BuildConfig.TWELVE_DATA_API_KEY
+
+            if (apiKey.isBlank()) {
+                showError(market)
+                return@Thread
             }
 
-        }, 60_000)
-    }
+            val url =
+                "https://api.twelvedata.com/time_series" +
+                        "?symbol=${market.symbol}" +
+                        "&interval=1min" +
+                        "&outputsize=100" +
+                        "&apikey=$apiKey"
 
-    /*
-     * Twelve Data থেকে 1-minute candle নেওয়া
-     */
-    private fun loadMarketData(market: Market) {
+            val request =
+                Request.Builder()
+                    .url(url)
+                    .get()
+                    .build()
 
-        Thread {
+            client.newCall(request)
+                .execute()
+                .use { response ->
 
-            try {
+                    val body =
+                        response.body?.string() ?: ""
 
-                val apiKey =
-                    BuildConfig.TWELVE_DATA_API_KEY
+                    val json = try {
+                        JSONObject(body)
+                    } catch (e: Exception) {
+                        showError(market)
+                        return@use
+                    }
 
-                if (apiKey.isBlank()) {
+                    if (!json.has("values")) {
+                        showError(market)
+                        return@use
+                    }
 
-                    showError(market)
+                    val values =
+                        json.getJSONArray("values")
 
-                    return@Thread
-                }
+                    if (values.length() < 30) {
+                        showError(market)
+                        return@use
+                    }
 
-                val url =
-                    "https://api.twelvedata.com/time_series" +
-                            "?symbol=${market.symbol}" +
-                            "&interval=1min" +
-                            "&outputsize=50" +
-                            "&apikey=$apiKey"
+                    /*
+                     * Close prices
+                     *
+                     * Twelve Data newest candle
+                     * আগে দেয়।
+                     *
+                     * তাই oldest -> newest
+                     */
+                    val closes =
+                        mutableListOf<Double>()
 
-                val request =
-                    Request.Builder()
-                        .url(url)
-                        .get()
-                        .build()
+                    for (i in values.length() - 1 downTo 0) {
 
-                client.newCall(request)
-                    .execute()
-                    .use { response ->
+                        val candle =
+                            values.getJSONObject(i)
 
-                        val body =
-                            response.body?.string() ?: ""
+                        val close =
+                            candle
+                                .getString("close")
+                                .toDoubleOrNull()
 
-                        val json = try {
-
-                            JSONObject(body)
-
-                        } catch (e: Exception) {
-
-                            showError(market)
-
-                            return@use
-                        }
-
-                        if (!json.has("values")) {
-
-                            showError(market)
-
-                            return@use
-                        }
-
-                        val values =
-                            json.getJSONArray("values")
-
-                        if (values.length() < 22) {
-
-                            showError(market)
-
-                            return@use
-                        }
-
-                        /*
-                         * Candle close prices
-                         *
-                         * Twelve Data সাধারণত newest
-                         * candle আগে দেয়।
-                         *
-                         * তাই oldest -> newest করা হচ্ছে।
-                         */
-                        val closes =
-                            mutableListOf<Double>()
-
-                        for (i in values.length() - 1 downTo 0) {
-
-                            val candle =
-                                values.getJSONObject(i)
-
-                            val close =
-                                candle
-                                    .getString("close")
-                                    .toDoubleOrNull()
-
-                            if (close != null) {
-                                closes.add(close)
-                            }
-                        }
-
-                        if (closes.size < 22) {
-
-                            showError(market)
-
-                            return@use
-                        }
-
-                        val currentPrice =
-                            closes.last()
-
-                        /*
-                         * EMA 9
-                         */
-                        val ema9 =
-                            calculateEMA(
-                                closes,
-                                9
-                            )
-
-                        /*
-                         * EMA 21
-                         */
-                        val ema21 =
-                            calculateEMA(
-                                closes,
-                                21
-                            )
-
-                        /*
-                         * RSI 14
-                         */
-                        val rsi =
-                            calculateRSI(
-                                closes,
-                                14
-                            )
-
-                        /*
-                         * Signal
-                         */
-                        val signal =
-                            calculateSignal(
-                                ema9,
-                                ema21,
-                                rsi
-                            )
-
-                        /*
-                         * UI update
-                         */
-                        runOnUiThread {
-
-                            findViewById<TextView>(
-                                market.priceId
-                            ).text =
-                                "Price: " +
-                                        formatPrice(
-                                            currentPrice,
-                                            market.symbol
-                                        )
-
-                            findViewById<TextView>(
-                                market.signalId
-                            ).text =
-                                signal
+                        if (close != null) {
+                            closes.add(close)
                         }
                     }
 
-            } catch (e: Exception) {
+                    if (closes.size < 30) {
+                        showError(market)
+                        return@use
+                    }
 
-                showError(market)
-            }
+                    /*
+                     * Current price
+                     */
+                    val currentPrice =
+                        closes.last()
 
-        }.start()
+                    /*
+                     * EMA 9
+                     */
+                    val ema9 =
+                        calculateEMA(
+                            closes,
+                            9
+                        )
+
+                    /*
+                     * EMA 21
+                     */
+                    val ema21 =
+                        calculateEMA(
+                            closes,
+                            21
+                        )
+
+                    /*
+                     * RSI 14
+                     */
+                    val rsi =
+                        calculateRSI(
+                            closes,
+                            14
+                        )
+
+                    /*
+                     * Momentum
+                     *
+                     * শেষ candle আগের candle-এর
+                     * চেয়ে উপরে/নিচে কিনা
+                     */
+                    val previousPrice =
+                        closes[closes.size - 2]
+
+                    val momentum =
+                        when {
+
+                            currentPrice > previousPrice ->
+                                1
+
+                            currentPrice < previousPrice ->
+                                -1
+
+                            else ->
+                                0
+                        }
+
+                    /*
+                     * Signal
+                     */
+                    val signal =
+                        calculateSignal(
+                            ema9,
+                            ema21,
+                            rsi,
+                            momentum
+                        )
+
+                    /*
+                     * UI update
+                     */
+                    runOnUiThread {
+
+                        findViewById<TextView>(
+                            market.priceId
+                        ).text =
+                            "Price: ${
+                                formatPrice(
+                                    currentPrice
+                                )
+                            }"
+
+                        findViewById<TextView>(
+                            market.signalId
+                        ).text =
+                            signal
+                    }
+                }
+
+        } catch (e: Exception) {
+
+            showError(market)
+        }
+
+    }.start()
+}
+
+/*
+ * EMA calculation
+ */
+private fun calculateEMA(
+    prices: List<Double>,
+    period: Int
+): Double {
+
+    if (prices.size < period) {
+        return prices.lastOrNull() ?: 0.0
     }
 
-    /*
-     * EMA calculation
-     */
-    private fun calculateEMA(
-        prices: List<Double>,
-        period: Int
-    ): Double {
+    val multiplier =
+        2.0 / (period + 1)
 
-        if (prices.isEmpty()) {
-            return 0.0
-        }
+    var ema =
+        prices.take(period).average()
 
-        val multiplier =
-            2.0 / (period + 1)
+    for (i in period until prices.size) {
 
-        var ema =
-            prices.take(period).average()
-
-        for (i in period until prices.size) {
-
-            ema =
-                ((prices[i] - ema) * multiplier) +
-                        ema
-        }
-
-        return ema
+        ema =
+            ((prices[i] - ema) * multiplier) +
+                    ema
     }
 
-    /*
-     * RSI calculation
-     */
-    private fun calculateRSI(
-        prices: List<Double>,
-        period: Int
-    ): Double {
+    return ema
+}
 
-        if (prices.size <= period) {
-            return 50.0
-        }
+/*
+ * RSI 14
+ *
+ * Wilder RSI
+ */
+private fun calculateRSI(
+    prices: List<Double>,
+    period: Int
+): Double {
 
-        var gain = 0.0
-        var loss = 0.0
-
-        /*
-         * প্রথম 14 candle
-         */
-        for (i in 1..period) {
-
-            val change =
-                prices[i] - prices[i - 1]
-
-            if (change > 0) {
-                gain += change
-            } else {
-                loss += -change
-            }
-        }
-
-        var averageGain =
-            gain / period
-
-        var averageLoss =
-            loss / period
-
-        /*
-         * পরের candleগুলো দিয়ে Wilder RSI
-         */
-        for (i in period + 1 until prices.size) {
-
-            val change =
-                prices[i] - prices[i - 1]
-
-            val currentGain =
-                if (change > 0) change else 0.0
-
-            val currentLoss =
-                if (change < 0) -change else 0.0
-
-            averageGain =
-                ((averageGain * (period - 1)) +
-                        currentGain) / period
-
-            averageLoss =
-                ((averageLoss * (period - 1)) +
-                        currentLoss) / period
-        }
-
-        if (averageLoss == 0.0) {
-            return 100.0
-        }
-
-        val relativeStrength =
-            averageGain / averageLoss
-
-        return 100.0 -
-                (100.0 /
-                        (1.0 + relativeStrength))
+    if (prices.size <= period) {
+        return 50.0
     }
 
-    /*
-     * EMA + RSI signal logic
-     *
-     * BUY:
-     * EMA9 > EMA21
-     * RSI 50 থেকে 70
-     *
-     * SELL:
-     * EMA9 < EMA21
-     * RSI 30 থেকে 50
-     *
-     * অন্য অবস্থায় WAIT
-     */
-    private fun calculateSignal(
-        ema9: Double,
-        ema21: Double,
-        rsi: Double
-    ): String {
+    var gain = 0.0
+    var loss = 0.0
 
-        return when {
+    for (i in 1..period) {
 
-            ema9 > ema21 &&
-                    rsi >= 50 &&
-                    rsi < 70 ->
+        val change =
+            prices[i] - prices[i - 1]
 
-                "BUY"
-
-            ema9 < ema21 &&
-                    rsi > 30 &&
-                    rsi < 50 ->
-
-                "SELL"
-
-            else ->
-                "WAIT"
-        }
-    }
-
-    /*
-     * Price কত decimal দেখাবে
-     */
-    private fun formatPrice(
-        price: Double,
-        symbol: String
-    ): String {
-
-        return if (symbol == "BTC/USD") {
-
-            String.format(
-                "%.2f",
-                price
-            )
-
+        if (change > 0) {
+            gain += change
         } else {
-
-            String.format(
-                "%.2f",
-                price
-            )
+            loss += -change
         }
     }
 
-    /*
-     * Error হলে
-     */
-    private fun showError(
-        market: Market
-    ) {
+    var averageGain =
+        gain / period
 
-        runOnUiThread {
+    var averageLoss =
+        loss / period
 
-            findViewById<TextView>(
-                market.priceId
-            ).text =
-                "Price: --"
+    for (i in period + 1 until prices.size) {
 
-            findViewById<TextView>(
-                market.signalId
-            ).text =
-                "WAIT"
-        }
+        val change =
+            prices[i] - prices[i - 1]
+
+        val currentGain =
+            if (change > 0) change else 0.0
+
+        val currentLoss =
+            if (change < 0) -change else 0.0
+
+        averageGain =
+            (
+                averageGain * (period - 1) +
+                        currentGain
+                ) / period
+
+        averageLoss =
+            (
+                averageLoss * (period - 1) +
+                        currentLoss
+                ) / period
     }
 
-    override fun onDestroy() {
-
-        super.onDestroy()
-
-        handler.removeCallbacksAndMessages(null)
-
-        client.dispatcher
-            .executorService
-            .shutdown()
+    if (averageLoss == 0.0) {
+        return 100.0
     }
 
-    data class Market(
-        val name: String,
-        val symbol: String,
-        val priceId: Int,
-        val signalId: Int
+    val relativeStrength =
+        averageGain / averageLoss
+
+    return 100.0 -
+            (
+                100.0 /
+                        (1.0 + relativeStrength)
+                )
+}
+
+/*
+ * Improved signal
+ *
+ * BUY:
+ * EMA9 > EMA21
+ * RSI 50-70
+ * Momentum UP
+ *
+ * SELL:
+ * EMA9 < EMA21
+ * RSI 30-50
+ * Momentum DOWN
+ *
+ * অন্য অবস্থায় WAIT
+ */
+private fun calculateSignal(
+    ema9: Double,
+    ema21: Double,
+    rsi: Double,
+    momentum: Int
+): String {
+
+    return when {
+
+        ema9 > ema21 &&
+                rsi >= 50.0 &&
+                rsi < 70.0 &&
+                momentum > 0 ->
+
+            "BUY"
+
+        ema9 < ema21 &&
+                rsi > 30.0 &&
+                rsi < 50.0 &&
+                momentum < 0 ->
+
+            "SELL"
+
+        else ->
+            "WAIT"
+    }
+}
+
+/*
+ * Price format
+ */
+private fun formatPrice(
+    price: Double
+): String {
+
+    return String.format(
+        Locale.US,
+        "%.2f",
+        price
     )
+}
+
+/*
+ * Error
+ */
+private fun showError(
+    market: Market
+) {
+
+    runOnUiThread {
+
+        findViewById<TextView>(
+            market.priceId
+        ).text =
+            "Price: --"
+
+        findViewById<TextView>(
+            market.signalId
+        ).text =
+            "WAIT"
+    }
+}
+
+override fun onDestroy() {
+
+    super.onDestroy()
+
+    handler.removeCallbacksAndMessages(null)
+
+    client.dispatcher
+        .executorService
+        .shutdown()
+}
+
+data class Market(
+    val name: String,
+    val symbol: String,
+    val priceId: Int,
+    val signalId: Int
+)
+
 }
