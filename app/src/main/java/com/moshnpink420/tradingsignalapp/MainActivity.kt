@@ -18,366 +18,278 @@ class MainActivity : Activity() {
     private val client = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
     private val handler = Handler(Looper.getMainLooper())
 
-    private var isLoading = false
+    // আপনার Twelve Data API Key এখানে দিন
+    private val apiKey = "YOUR_API_KEY"
 
-    private val markets = listOf(
-        Market(
-            "BTC/USD",
-            "BTC/USD",
-            R.id.btcPrice,
-            R.id.btcSignal
-        ),
-        Market(
-            "XAU/USD",
-            "XAU/USD",
-            R.id.goldPrice,
-            R.id.goldSignal
-        )
-    )
+    private lateinit var btcPrice: TextView
+    private lateinit var btcSignal: TextView
+    private lateinit var btcInfo: TextView
+
+    private lateinit var xauPrice: TextView
+    private lateinit var xauSignal: TextView
+    private lateinit var xauInfo: TextView
+
+    // 2 মিনিট পরপর API request
+    private val updateRunnable = object : Runnable {
+        override fun run() {
+            loadMarketData()
+            handler.postDelayed(this, 120000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         setContentView(R.layout.activity_main)
 
-        // First request
-        loadAllMarkets()
+        btcPrice = findViewById(R.id.btcPrice)
+        btcSignal = findViewById(R.id.btcSignal)
+        btcInfo = findViewById(R.id.btcInfo)
+
+        xauPrice = findViewById(R.id.xauPrice)
+        xauSignal = findViewById(R.id.xauSignal)
+        xauInfo = findViewById(R.id.xauInfo)
+
+        loadMarketData()
     }
 
-    private fun loadAllMarkets() {
+    override fun onResume() {
+        super.onResume()
 
-        // Prevent overlapping refresh cycles
-        if (isLoading) return
-
-        isLoading = true
-
-        // BTC request
-        loadMarketData(markets[0])
-
-        // XAU request after 20 seconds
-        handler.postDelayed({
-
-            loadMarketData(markets[1])
-
-        }, 20000)
-
-        // Allow next refresh after both requests
-        handler.postDelayed({
-
-            isLoading = false
-
-        }, 25000)
-
-        // Refresh every 2 minutes
-        handler.postDelayed({
-
-            loadAllMarkets()
-
-        }, 120000)
+        handler.removeCallbacks(updateRunnable)
+        handler.postDelayed(updateRunnable, 120000)
     }
 
-    private fun loadMarketData(market: Market) {
+    override fun onPause() {
+        super.onPause()
+        handler.removeCallbacks(updateRunnable)
+    }
+
+    private fun loadMarketData() {
+
+        btcPrice.text = "Price: loading..."
+        btcSignal.text = "Signal: WAIT"
+
+        xauPrice.text = "Price: loading..."
+        xauSignal.text = "Signal: WAIT"
 
         Thread {
 
-            try {
-
-                val apiKey =
-                    BuildConfig.TWELVE_DATA_API_KEY
-
-                if (apiKey.isBlank()) {
-
-                    showError(
-                        market,
-                        "API KEY EMPTY"
-                    )
-
-                    return@Thread
-                }
-
-                val encodedSymbol =
-                    URLEncoder.encode(
-                        market.symbol,
-                        "UTF-8"
-                    )
-
-                val url =
-                    "https://api.twelvedata.com/time_series" +
-                            "?symbol=$encodedSymbol" +
-                            "&interval=5min" +
-                            "&outputsize=35" +
-                            "&apikey=$apiKey"
-
-                val request =
-                    Request.Builder()
-                        .url(url)
-                        .header("Accept", "application/json")
-                        .get()
-                        .build()
-
-                client.newCall(request)
-                    .execute()
-                    .use { response ->
-
-                        val body =
-                            response.body?.string() ?: ""
-
-                        /*
-                         * HTTP 429
-                         *
-                         * Too many requests.
-                         */
-                        if (response.code == 429) {
-
-                            showError(
-                                market,
-                                "RATE LIMIT - WAIT"
-                            )
-
-                            return@use
-                        }
-
-                        if (!response.isSuccessful) {
-
-                            showError(
-                                market,
-                                "HTTP ${response.code}"
-                            )
-
-                            return@use
-                        }
-
-                        if (body.isBlank()) {
-
-                            showError(
-                                market,
-                                "EMPTY RESPONSE"
-                            )
-
-                            return@use
-                        }
-
-                        val json =
-                            try {
-
-                                JSONObject(body)
-
-                            } catch (e: Exception) {
-
-                                showError(
-                                    market,
-                                    "INVALID JSON"
-                                )
-
-                                return@use
-                            }
-
-                        /*
-                         * Twelve Data API error
-                         */
-                        if (
-                            json.optString("status")
-                                .equals("error", true)
-                        ) {
-
-                            val errorMessage =
-                                json.optString(
-                                    "message",
-                                    "UNKNOWN API ERROR"
-                                )
-
-                            showError(
-                                market,
-                                "API ERROR"
-                            )
-
-                            return@use
-                        }
-
-                        if (!json.has("values")) {
-
-                            showError(
-                                market,
-                                "NO DATA"
-                            )
-
-                            return@use
-                        }
-
-                        val values =
-                            json.optJSONArray("values")
-
-                        if (values == null) {
-
-                            showError(
-                                market,
-                                "VALUES ERROR"
-                            )
-
-                            return@use
-                        }
-
-                        if (values.length() < 25) {
-
-                            showError(
-                                market,
-                                "NOT ENOUGH DATA"
-                            )
-
-                            return@use
-                        }
-
-                        /*
-                         * Convert candle closes.
-                         *
-                         * Twelve Data normally sends
-                         * newest candle first.
-                         *
-                         * Reverse to:
-                         * oldest -> newest
-                         */
-                        val closes =
-                            mutableListOf<Double>()
-
-                        for (
-                            i in values.length() - 1 downTo 0
-                        ) {
-
-                            val candle =
-                                values.optJSONObject(i)
-
-                            if (candle != null) {
-
-                                val close =
-                                    candle
-                                        .optString("close")
-                                        .toDoubleOrNull()
-
-                                if (close != null) {
-
-                                    closes.add(close)
-                                }
-                            }
-                        }
-
-                        if (closes.size < 25) {
-
-                            showError(
-                                market,
-                                "CLOSE DATA ERROR"
-                            )
-
-                            return@use
-                        }
-
-                        val currentPrice =
-                            closes.last()
-
-                        val previousPrice =
-                            closes[
-                                closes.size - 2
-                            ]
-
-                        val ema9 =
-                            calculateEMA(
-                                closes,
-                                9
-                            )
-
-                        val ema21 =
-                            calculateEMA(
-                                closes,
-                                21
-                            )
-
-                        val rsi =
-                            calculateRSI(
-                                closes,
-                                14
-                            )
-
-                        val momentum =
-                            when {
-
-                                currentPrice >
-                                        previousPrice ->
-                                    1
-
-                                currentPrice <
-                                        previousPrice ->
-                                    -1
-
-                                else ->
-                                    0
-                            }
-
-                        val trend =
-                            calculateTrend(
-                                closes
-                            )
-
-                        val emaDifference =
-                            if (ema21 != 0.0) {
-
-                                abs(
-                                    ema9 - ema21
-                                ) /
-                                        abs(ema21) *
-                                        100.0
-
-                            } else {
-
-                                0.0
-                            }
-
-                        val signal =
-                            calculateStrongSignal(
-                                ema9,
-                                ema21,
-                                rsi,
-                                momentum,
-                                trend,
-                                emaDifference
-                            )
-
-                        runOnUiThread {
-
-                            val priceView =
-                                findViewById<TextView>(
-                                    market.priceId
-                                )
-
-                            val signalView =
-                                findViewById<TextView>(
-                                    market.signalId
-                                )
-
-                            priceView.text =
-                                "Price: ${
-                                    formatPrice(
-                                        currentPrice,
-                                        market.symbol
-                                    )
-                                }"
-
-                            signalView.text =
-                                signal
-                        }
-                    }
-
-            } catch (e: Exception) {
-
-                showError(
-                    market,
-                    "CONNECTION ERROR"
+            val btcResult = getSignal("BTC/USD")
+            val xauResult = getSignal("XAU/USD")
+
+            runOnUiThread {
+
+                updateUI(
+                    btcResult,
+                    btcPrice,
+                    btcSignal,
+                    btcInfo
+                )
+
+                updateUI(
+                    xauResult,
+                    xauPrice,
+                    xauSignal,
+                    xauInfo
                 )
             }
 
         }.start()
+    }
+
+    private fun getSignal(symbol: String): MarketResult {
+
+        return try {
+
+            val encodedSymbol = URLEncoder.encode(symbol, "UTF-8")
+
+            /*
+             * গুরুত্বপূর্ণ:
+             * একই API request থেকেই price + candles নেওয়া হচ্ছে।
+             * আলাদা price request করা হচ্ছে না।
+             */
+            val url =
+                "https://api.twelvedata.com/time_series" +
+                        "?symbol=$encodedSymbol" +
+                        "&interval=5min" +
+                        "&outputsize=100" +
+                        "&apikey=$apiKey"
+
+            val request = Request.Builder()
+                .url(url)
+                .get()
+                .build()
+
+            client.newCall(request).execute().use { response ->
+
+                val body = response.body?.string() ?: ""
+
+                if (!response.isSuccessful) {
+
+                    if (response.code == 429) {
+                        return MarketResult(
+                            price = null,
+                            signal = "WAIT",
+                            info = "Rate limit - wait"
+                        )
+                    }
+
+                    return MarketResult(
+                        price = null,
+                        signal = "WAIT",
+                        info = "API error ${response.code}"
+                    )
+                }
+
+                val json = JSONObject(body)
+
+                if (json.has("code")) {
+
+                    val code = json.optInt("code")
+
+                    if (code == 429) {
+                        return MarketResult(
+                            price = null,
+                            signal = "WAIT",
+                            info = "Rate limit - wait"
+                        )
+                    }
+
+                    return MarketResult(
+                        price = null,
+                        signal = "WAIT",
+                        info = json.optString(
+                            "message",
+                            "API error"
+                        )
+                    )
+                }
+
+                val values = json.optJSONArray("values")
+
+                if (values == null || values.length() < 30) {
+
+                    return MarketResult(
+                        price = null,
+                        signal = "WAIT",
+                        info = "Not enough data"
+                    )
+                }
+
+                val closes = ArrayList<Double>()
+
+                for (i in values.length() - 1 downTo 0) {
+
+                    val candle = values.getJSONObject(i)
+
+                    val close =
+                        candle.optString("close").toDoubleOrNull()
+
+                    if (close != null) {
+                        closes.add(close)
+                    }
+                }
+
+                if (closes.size < 30) {
+
+                    return MarketResult(
+                        price = null,
+                        signal = "WAIT",
+                        info = "Not enough candles"
+                    )
+                }
+
+                val currentPrice = closes.last()
+
+                val ema9 = calculateEMA(closes, 9)
+                val ema21 = calculateEMA(closes, 21)
+
+                val rsi = calculateRSI(closes, 14)
+
+                val previousPrice =
+                    closes[closes.size - 2]
+
+                val momentum =
+                    ((currentPrice - previousPrice) / previousPrice) * 100.0
+
+                var buyScore = 0
+                var sellScore = 0
+
+                // EMA confirmation
+                if (ema9 > ema21) {
+                    buyScore++
+                } else if (ema9 < ema21) {
+                    sellScore++
+                }
+
+                // RSI confirmation
+                if (rsi >= 50.0 && rsi <= 70.0) {
+                    buyScore++
+                }
+
+                if (rsi <= 50.0 && rsi >= 30.0) {
+                    sellScore++
+                }
+
+                // Momentum confirmation
+                if (momentum > 0.03) {
+                    buyScore++
+                } else if (momentum < -0.03) {
+                    sellScore++
+                }
+
+                /*
+                 * Strong signal:
+                 * কমপক্ষে 3 confirmation
+                 */
+                val signal = when {
+
+                    buyScore >= 3 && buyScore > sellScore ->
+                        "STRONG BUY"
+
+                    sellScore >= 3 && sellScore > buyScore ->
+                        "STRONG SELL"
+
+                    buyScore >= 2 && buyScore > sellScore ->
+                        "BUY"
+
+                    sellScore >= 2 && sellScore > buyScore ->
+                        "SELL"
+
+                    else ->
+                        "WAIT"
+                }
+
+                val info = String.format(
+                    Locale.US,
+                    "EMA9: %.2f | EMA21: %.2f\nRSI: %.1f | Momentum: %.3f%%",
+                    ema9,
+                    ema21,
+                    rsi,
+                    momentum
+                )
+
+                MarketResult(
+                    price = currentPrice,
+                    signal = signal,
+                    info = info
+                )
+            }
+
+        } catch (e: Exception) {
+
+            MarketResult(
+                price = null,
+                signal = "WAIT",
+                info = "Connection error"
+            )
+        }
     }
 
     private fun calculateEMA(
@@ -386,24 +298,20 @@ class MainActivity : Activity() {
     ): Double {
 
         if (prices.size < period) {
-
-            return prices.lastOrNull()
-                ?: 0.0
+            return prices.last()
         }
 
         val multiplier =
             2.0 / (period + 1)
 
-        var ema =
-            prices.take(period).average()
+        var ema = prices
+            .take(period)
+            .average()
 
-        for (
-            i in period until prices.size
-        ) {
+        for (i in period until prices.size) {
 
             ema =
-                ((prices[i] - ema) *
-                        multiplier) + ema
+                ((prices[i] - ema) * multiplier) + ema
         }
 
         return ema
@@ -415,7 +323,6 @@ class MainActivity : Activity() {
     ): Double {
 
         if (prices.size <= period) {
-
             return 50.0
         }
 
@@ -428,12 +335,9 @@ class MainActivity : Activity() {
                 prices[i] - prices[i - 1]
 
             if (change > 0) {
-
                 gain += change
-
             } else {
-
-                loss += -change
+                loss += abs(change)
             }
         }
 
@@ -443,231 +347,64 @@ class MainActivity : Activity() {
         var averageLoss =
             loss / period
 
-        for (
-            i in period + 1 until prices.size
-        ) {
+        for (i in period + 1 until prices.size) {
 
             val change =
                 prices[i] - prices[i - 1]
 
             val currentGain =
-                if (change > 0)
-                    change
-                else
-                    0.0
+                if (change > 0) change else 0.0
 
             val currentLoss =
-                if (change < 0)
-                    -change
-                else
-                    0.0
+                if (change < 0) abs(change) else 0.0
 
             averageGain =
-                (
-                    averageGain *
-                            (period - 1) +
-                            currentGain
-                    ) / period
+                ((averageGain * (period - 1)) + currentGain) / period
 
             averageLoss =
-                (
-                    averageLoss *
-                            (period - 1) +
-                            currentLoss
-                    ) / period
+                ((averageLoss * (period - 1)) + currentLoss) / period
         }
 
         if (averageLoss == 0.0) {
-
             return 100.0
         }
 
         val rs =
             averageGain / averageLoss
 
-        return 100.0 -
-                (
-                    100.0 /
-                            (1.0 + rs)
-                    )
+        return 100.0 - (100.0 / (1.0 + rs))
     }
 
-    private fun calculateTrend(
-        prices: List<Double>
-    ): Int {
+    private fun updateUI(
+        result: MarketResult,
+        priceView: TextView,
+        signalView: TextView,
+        infoView: TextView
+    ) {
 
-        if (prices.size < 6) {
+        if (result.price != null) {
 
-            return 0
-        }
-
-        val recent =
-            prices.last()
-
-        val old =
-            prices[
-                prices.size - 6
-            ]
-
-        return when {
-
-            recent > old -> 1
-
-            recent < old -> -1
-
-            else -> 0
-        }
-    }
-
-    private fun calculateStrongSignal(
-        ema9: Double,
-        ema21: Double,
-        rsi: Double,
-        momentum: Int,
-        trend: Int,
-        emaDifference: Double
-    ): String {
-
-        var buyScore = 0
-        var sellScore = 0
-
-        // EMA confirmation
-        if (ema9 > ema21) {
-
-            buyScore++
-
-        } else if (ema9 < ema21) {
-
-            sellScore++
-        }
-
-        // RSI confirmation
-        if (
-            rsi >= 55.0 &&
-            rsi <= 68.0
-        ) {
-
-            buyScore++
-
-        } else if (
-            rsi >= 32.0 &&
-            rsi <= 45.0
-        ) {
-
-            sellScore++
-        }
-
-        // Momentum confirmation
-        if (momentum > 0) {
-
-            buyScore++
-
-        } else if (momentum < 0) {
-
-            sellScore++
-        }
-
-        // Trend confirmation
-        if (trend > 0) {
-
-            buyScore++
-
-        } else if (trend < 0) {
-
-            sellScore++
-        }
-
-        // EMA separation
-        if (emaDifference >= 0.03) {
-
-            if (ema9 > ema21) {
-
-                buyScore++
-
-            } else if (ema9 < ema21) {
-
-                sellScore++
-            }
-        }
-
-        return when {
-
-            buyScore >= 4 &&
-                    buyScore > sellScore ->
-                "STRONG BUY"
-
-            sellScore >= 4 &&
-                    sellScore > buyScore ->
-                "STRONG SELL"
-
-            else ->
-                "WAIT"
-        }
-    }
-
-    private fun formatPrice(
-        price: Double,
-        symbol: String
-    ): String {
-
-        return if (symbol == "BTC/USD") {
-
-            String.format(
+            priceView.text = String.format(
                 Locale.US,
-                "%.2f",
-                price
+                "Price: %.2f",
+                result.price
             )
 
         } else {
 
-            String.format(
-                Locale.US,
-                "%.2f",
-                price
-            )
+            priceView.text = "Price: --"
         }
+
+        signalView.text =
+            "Signal: ${result.signal}"
+
+        infoView.text =
+            result.info
     }
 
-    private fun showError(
-        market: Market,
-        message: String
-    ) {
-
-        runOnUiThread {
-
-            val priceView =
-                findViewById<TextView>(
-                    market.priceId
-                )
-
-            val signalView =
-                findViewById<TextView>(
-                    market.signalId
-                )
-
-            priceView.text =
-                "Price: --"
-
-            signalView.text =
-                message
-        }
-    }
-
-    override fun onDestroy() {
-
-        handler.removeCallbacksAndMessages(null)
-
-        client.dispatcher
-            .executorService
-            .shutdown()
-
-        super.onDestroy()
-    }
-
-    data class Market(
-        val name: String,
-        val symbol: String,
-        val priceId: Int,
-        val signalId: Int
+    data class MarketResult(
+        val price: Double?,
+        val signal: String,
+        val info: String
     )
 }
