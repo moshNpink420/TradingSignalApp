@@ -23,18 +23,15 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // আপনার Twelve Data API Key এখানে দিন
+    // এখানে আপনার Twelve Data API Key বসান
     private val apiKey = "YOUR_API_KEY"
 
     private lateinit var btcPrice: TextView
     private lateinit var btcSignal: TextView
-    private lateinit var btcInfo: TextView
 
-    private lateinit var xauPrice: TextView
-    private lateinit var xauSignal: TextView
-    private lateinit var xauInfo: TextView
+    private lateinit var goldPrice: TextView
+    private lateinit var goldSignal: TextView
 
-    // 2 মিনিট পরপর API request
     private val updateRunnable = object : Runnable {
         override fun run() {
             loadMarketData()
@@ -49,11 +46,9 @@ class MainActivity : Activity() {
 
         btcPrice = findViewById(R.id.btcPrice)
         btcSignal = findViewById(R.id.btcSignal)
-        btcInfo = findViewById(R.id.btcInfo)
 
-        xauPrice = findViewById(R.id.xauPrice)
-        xauSignal = findViewById(R.id.xauSignal)
-        xauInfo = findViewById(R.id.xauInfo)
+        goldPrice = findViewById(R.id.goldPrice)
+        goldSignal = findViewById(R.id.goldSignal)
 
         loadMarketData()
     }
@@ -73,30 +68,28 @@ class MainActivity : Activity() {
     private fun loadMarketData() {
 
         btcPrice.text = "Price: loading..."
-        btcSignal.text = "Signal: WAIT"
+        btcSignal.text = "WAIT"
 
-        xauPrice.text = "Price: loading..."
-        xauSignal.text = "Signal: WAIT"
+        goldPrice.text = "Price: loading..."
+        goldSignal.text = "WAIT"
 
         Thread {
 
             val btcResult = getSignal("BTC/USD")
-            val xauResult = getSignal("XAU/USD")
+            val goldResult = getSignal("XAU/USD")
 
             runOnUiThread {
 
                 updateUI(
                     btcResult,
                     btcPrice,
-                    btcSignal,
-                    btcInfo
+                    btcSignal
                 )
 
                 updateUI(
-                    xauResult,
-                    xauPrice,
-                    xauSignal,
-                    xauInfo
+                    goldResult,
+                    goldPrice,
+                    goldSignal
                 )
             }
 
@@ -107,13 +100,9 @@ class MainActivity : Activity() {
 
         return try {
 
-            val encodedSymbol = URLEncoder.encode(symbol, "UTF-8")
+            val encodedSymbol =
+                URLEncoder.encode(symbol, "UTF-8")
 
-            /*
-             * গুরুত্বপূর্ণ:
-             * একই API request থেকেই price + candles নেওয়া হচ্ছে।
-             * আলাদা price request করা হচ্ছে না।
-             */
             val url =
                 "https://api.twelvedata.com/time_series" +
                         "?symbol=$encodedSymbol" +
@@ -128,22 +117,24 @@ class MainActivity : Activity() {
 
             client.newCall(request).execute().use { response ->
 
-                val body = response.body?.string() ?: ""
+                val body =
+                    response.body?.string() ?: ""
 
                 if (!response.isSuccessful) {
 
                     if (response.code == 429) {
+
                         return MarketResult(
-                            price = null,
-                            signal = "WAIT",
-                            info = "Rate limit - wait"
+                            null,
+                            "WAIT",
+                            "Rate limit - wait"
                         )
                     }
 
                     return MarketResult(
-                        price = null,
-                        signal = "WAIT",
-                        info = "API error ${response.code}"
+                        null,
+                        "WAIT",
+                        "API error ${response.code}"
                     )
                 }
 
@@ -151,45 +142,54 @@ class MainActivity : Activity() {
 
                 if (json.has("code")) {
 
-                    val code = json.optInt("code")
+                    val code =
+                        json.optInt("code")
 
                     if (code == 429) {
+
                         return MarketResult(
-                            price = null,
-                            signal = "WAIT",
-                            info = "Rate limit - wait"
+                            null,
+                            "WAIT",
+                            "Rate limit - wait"
                         )
                     }
 
                     return MarketResult(
-                        price = null,
-                        signal = "WAIT",
-                        info = json.optString(
+                        null,
+                        "WAIT",
+                        json.optString(
                             "message",
                             "API error"
                         )
                     )
                 }
 
-                val values = json.optJSONArray("values")
+                val values =
+                    json.optJSONArray("values")
 
-                if (values == null || values.length() < 30) {
+                if (values == null ||
+                    values.length() < 30
+                ) {
 
                     return MarketResult(
-                        price = null,
-                        signal = "WAIT",
-                        info = "Not enough data"
+                        null,
+                        "WAIT",
+                        "Not enough data"
                     )
                 }
 
-                val closes = ArrayList<Double>()
+                val closes =
+                    ArrayList<Double>()
 
                 for (i in values.length() - 1 downTo 0) {
 
-                    val candle = values.getJSONObject(i)
+                    val candle =
+                        values.getJSONObject(i)
 
                     val close =
-                        candle.optString("close").toDoubleOrNull()
+                        candle
+                            .optString("close")
+                            .toDoubleOrNull()
 
                     if (close != null) {
                         closes.add(close)
@@ -199,95 +199,96 @@ class MainActivity : Activity() {
                 if (closes.size < 30) {
 
                     return MarketResult(
-                        price = null,
-                        signal = "WAIT",
-                        info = "Not enough candles"
+                        null,
+                        "WAIT",
+                        "Not enough candles"
                     )
                 }
 
-                val currentPrice = closes.last()
-
-                val ema9 = calculateEMA(closes, 9)
-                val ema21 = calculateEMA(closes, 21)
-
-                val rsi = calculateRSI(closes, 14)
+                val currentPrice =
+                    closes.last()
 
                 val previousPrice =
                     closes[closes.size - 2]
 
+                val ema9 =
+                    calculateEMA(closes, 9)
+
+                val ema21 =
+                    calculateEMA(closes, 21)
+
+                val rsi =
+                    calculateRSI(closes, 14)
+
                 val momentum =
-                    ((currentPrice - previousPrice) / previousPrice) * 100.0
+                    ((currentPrice - previousPrice) /
+                            previousPrice) * 100.0
 
                 var buyScore = 0
                 var sellScore = 0
 
-                // EMA confirmation
+                // EMA
                 if (ema9 > ema21) {
                     buyScore++
                 } else if (ema9 < ema21) {
                     sellScore++
                 }
 
-                // RSI confirmation
-                if (rsi >= 50.0 && rsi <= 70.0) {
+                // RSI
+                if (rsi >= 50.0 &&
+                    rsi <= 70.0
+                ) {
                     buyScore++
                 }
 
-                if (rsi <= 50.0 && rsi >= 30.0) {
+                if (rsi <= 50.0 &&
+                    rsi >= 30.0
+                ) {
                     sellScore++
                 }
 
-                // Momentum confirmation
+                // Momentum
                 if (momentum > 0.03) {
                     buyScore++
                 } else if (momentum < -0.03) {
                     sellScore++
                 }
 
-                /*
-                 * Strong signal:
-                 * কমপক্ষে 3 confirmation
-                 */
                 val signal = when {
 
-                    buyScore >= 3 && buyScore > sellScore ->
+                    buyScore >= 3 &&
+                            buyScore > sellScore ->
                         "STRONG BUY"
 
-                    sellScore >= 3 && sellScore > buyScore ->
+                    sellScore >= 3 &&
+                            sellScore > buyScore ->
                         "STRONG SELL"
 
-                    buyScore >= 2 && buyScore > sellScore ->
+                    buyScore >= 2 &&
+                            buyScore > sellScore ->
                         "BUY"
 
-                    sellScore >= 2 && sellScore > buyScore ->
+                    sellScore >= 2 &&
+                            sellScore > buyScore ->
                         "SELL"
 
                     else ->
                         "WAIT"
                 }
 
-                val info = String.format(
-                    Locale.US,
-                    "EMA9: %.2f | EMA21: %.2f\nRSI: %.1f | Momentum: %.3f%%",
-                    ema9,
-                    ema21,
-                    rsi,
-                    momentum
-                )
-
                 MarketResult(
-                    price = currentPrice,
-                    signal = signal,
-                    info = info
+                    currentPrice,
+                    signal,
+                    ""
                 )
             }
 
         } catch (e: Exception) {
 
             MarketResult(
-                price = null,
-                signal = "WAIT",
-                info = "Connection error"
+                null,
+                "WAIT",
+                "Connection error"
             )
         }
     }
@@ -304,14 +305,14 @@ class MainActivity : Activity() {
         val multiplier =
             2.0 / (period + 1)
 
-        var ema = prices
-            .take(period)
-            .average()
+        var ema =
+            prices.take(period).average()
 
         for (i in period until prices.size) {
 
             ema =
-                ((prices[i] - ema) * multiplier) + ema
+                ((prices[i] - ema) *
+                        multiplier) + ema
         }
 
         return ema
@@ -359,10 +360,12 @@ class MainActivity : Activity() {
                 if (change < 0) abs(change) else 0.0
 
             averageGain =
-                ((averageGain * (period - 1)) + currentGain) / period
+                ((averageGain * (period - 1)) +
+                        currentGain) / period
 
             averageLoss =
-                ((averageLoss * (period - 1)) + currentLoss) / period
+                ((averageLoss * (period - 1)) +
+                        currentLoss) / period
         }
 
         if (averageLoss == 0.0) {
@@ -372,34 +375,37 @@ class MainActivity : Activity() {
         val rs =
             averageGain / averageLoss
 
-        return 100.0 - (100.0 / (1.0 + rs))
+        return 100.0 -
+                (100.0 / (1.0 + rs))
     }
 
     private fun updateUI(
         result: MarketResult,
         priceView: TextView,
-        signalView: TextView,
-        infoView: TextView
+        signalView: TextView
     ) {
 
         if (result.price != null) {
 
-            priceView.text = String.format(
-                Locale.US,
-                "Price: %.2f",
-                result.price
-            )
+            priceView.text =
+                String.format(
+                    Locale.US,
+                    "Price: %.2f",
+                    result.price
+                )
 
         } else {
 
-            priceView.text = "Price: --"
+            priceView.text =
+                "Price: --"
         }
 
         signalView.text =
-            "Signal: ${result.signal}"
-
-        infoView.text =
-            result.info
+            if (result.info.isNotEmpty()) {
+                "Signal: WAIT\n${result.info}"
+            } else {
+                "Signal: ${result.signal}"
+            }
     }
 
     data class MarketResult(
