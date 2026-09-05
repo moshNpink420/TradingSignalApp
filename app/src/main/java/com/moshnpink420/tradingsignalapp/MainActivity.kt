@@ -22,6 +22,8 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
+    private var isLoading = false
+
     private val markets = listOf(
         Market(
             "BTC/USD",
@@ -42,23 +44,40 @@ class MainActivity : Activity() {
 
         setContentView(R.layout.activity_main)
 
+        // First request
         loadAllMarkets()
     }
 
     private fun loadAllMarkets() {
 
-        // BTC first
+        // Prevent overlapping refresh cycles
+        if (isLoading) return
+
+        isLoading = true
+
+        // BTC request
         loadMarketData(markets[0])
 
-        // XAU after 8 seconds
+        // XAU request after 20 seconds
         handler.postDelayed({
-            loadMarketData(markets[1])
-        }, 8000)
 
-        // Repeat every 60 seconds
+            loadMarketData(markets[1])
+
+        }, 20000)
+
+        // Allow next refresh after both requests
         handler.postDelayed({
+
+            isLoading = false
+
+        }, 25000)
+
+        // Refresh every 2 minutes
+        handler.postDelayed({
+
             loadAllMarkets()
-        }, 60000)
+
+        }, 120000)
     }
 
     private fun loadMarketData(market: Market) {
@@ -67,7 +86,8 @@ class MainActivity : Activity() {
 
             try {
 
-                val apiKey = BuildConfig.TWELVE_DATA_API_KEY
+                val apiKey =
+                    BuildConfig.TWELVE_DATA_API_KEY
 
                 if (apiKey.isBlank()) {
 
@@ -95,6 +115,7 @@ class MainActivity : Activity() {
                 val request =
                     Request.Builder()
                         .url(url)
+                        .header("Accept", "application/json")
                         .get()
                         .build()
 
@@ -105,7 +126,21 @@ class MainActivity : Activity() {
                         val body =
                             response.body?.string() ?: ""
 
-                        // HTTP error
+                        /*
+                         * HTTP 429
+                         *
+                         * Too many requests.
+                         */
+                        if (response.code == 429) {
+
+                            showError(
+                                market,
+                                "RATE LIMIT - WAIT"
+                            )
+
+                            return@use
+                        }
+
                         if (!response.isSuccessful) {
 
                             showError(
@@ -128,7 +163,9 @@ class MainActivity : Activity() {
 
                         val json =
                             try {
+
                                 JSONObject(body)
+
                             } catch (e: Exception) {
 
                                 showError(
@@ -155,15 +192,12 @@ class MainActivity : Activity() {
 
                             showError(
                                 market,
-                                "API: $errorMessage"
+                                "API ERROR"
                             )
 
                             return@use
                         }
 
-                        /*
-                         * Check values
-                         */
                         if (!json.has("values")) {
 
                             showError(
@@ -198,11 +232,12 @@ class MainActivity : Activity() {
                         }
 
                         /*
-                         * Convert candle closes
+                         * Convert candle closes.
                          *
-                         * Twelve Data sends newest first.
-                         * We reverse it:
+                         * Twelve Data normally sends
+                         * newest candle first.
                          *
+                         * Reverse to:
                          * oldest -> newest
                          */
                         val closes =
@@ -223,6 +258,7 @@ class MainActivity : Activity() {
                                         .toDoubleOrNull()
 
                                 if (close != null) {
+
                                     closes.add(close)
                                 }
                             }
@@ -242,7 +278,9 @@ class MainActivity : Activity() {
                             closes.last()
 
                         val previousPrice =
-                            closes[closes.size - 2]
+                            closes[
+                                closes.size - 2
+                            ]
 
                         val ema9 =
                             calculateEMA(
@@ -265,10 +303,12 @@ class MainActivity : Activity() {
                         val momentum =
                             when {
 
-                                currentPrice > previousPrice ->
+                                currentPrice >
+                                        previousPrice ->
                                     1
 
-                                currentPrice < previousPrice ->
+                                currentPrice <
+                                        previousPrice ->
                                     -1
 
                                 else ->
@@ -276,16 +316,21 @@ class MainActivity : Activity() {
                             }
 
                         val trend =
-                            calculateTrend(closes)
+                            calculateTrend(
+                                closes
+                            )
 
                         val emaDifference =
                             if (ema21 != 0.0) {
 
                                 abs(
                                     ema9 - ema21
-                                ) / abs(ema21) * 100.0
+                                ) /
+                                        abs(ema21) *
+                                        100.0
 
                             } else {
+
                                 0.0
                             }
 
@@ -341,7 +386,9 @@ class MainActivity : Activity() {
     ): Double {
 
         if (prices.size < period) {
-            return prices.lastOrNull() ?: 0.0
+
+            return prices.lastOrNull()
+                ?: 0.0
         }
 
         val multiplier =
@@ -355,8 +402,8 @@ class MainActivity : Activity() {
         ) {
 
             ema =
-                ((prices[i] - ema) * multiplier) +
-                        ema
+                ((prices[i] - ema) *
+                        multiplier) + ema
         }
 
         return ema
@@ -368,6 +415,7 @@ class MainActivity : Activity() {
     ): Double {
 
         if (prices.size <= period) {
+
             return 50.0
         }
 
@@ -380,8 +428,11 @@ class MainActivity : Activity() {
                 prices[i] - prices[i - 1]
 
             if (change > 0) {
+
                 gain += change
+
             } else {
+
                 loss += -change
             }
         }
@@ -400,25 +451,34 @@ class MainActivity : Activity() {
                 prices[i] - prices[i - 1]
 
             val currentGain =
-                if (change > 0) change else 0.0
+                if (change > 0)
+                    change
+                else
+                    0.0
 
             val currentLoss =
-                if (change < 0) -change else 0.0
+                if (change < 0)
+                    -change
+                else
+                    0.0
 
             averageGain =
                 (
-                    averageGain * (period - 1) +
+                    averageGain *
+                            (period - 1) +
                             currentGain
                     ) / period
 
             averageLoss =
                 (
-                    averageLoss * (period - 1) +
+                    averageLoss *
+                            (period - 1) +
                             currentLoss
                     ) / period
         }
 
         if (averageLoss == 0.0) {
+
             return 100.0
         }
 
@@ -437,6 +497,7 @@ class MainActivity : Activity() {
     ): Int {
 
         if (prices.size < 6) {
+
             return 0
         }
 
@@ -444,7 +505,9 @@ class MainActivity : Activity() {
             prices.last()
 
         val old =
-            prices[prices.size - 6]
+            prices[
+                prices.size - 6
+            ]
 
         return when {
 
@@ -479,11 +542,17 @@ class MainActivity : Activity() {
         }
 
         // RSI confirmation
-        if (rsi >= 55.0 && rsi <= 68.0) {
+        if (
+            rsi >= 55.0 &&
+            rsi <= 68.0
+        ) {
 
             buyScore++
 
-        } else if (rsi >= 32.0 && rsi <= 45.0) {
+        } else if (
+            rsi >= 32.0 &&
+            rsi <= 45.0
+        ) {
 
             sellScore++
         }
@@ -508,7 +577,7 @@ class MainActivity : Activity() {
             sellScore++
         }
 
-        // EMA separation confirmation
+        // EMA separation
         if (emaDifference >= 0.03) {
 
             if (ema9 > ema21) {
@@ -541,11 +610,22 @@ class MainActivity : Activity() {
         symbol: String
     ): String {
 
-        return String.format(
-            Locale.US,
-            "%.2f",
-            price
-        )
+        return if (symbol == "BTC/USD") {
+
+            String.format(
+                Locale.US,
+                "%.2f",
+                price
+            )
+
+        } else {
+
+            String.format(
+                Locale.US,
+                "%.2f",
+                price
+            )
+        }
     }
 
     private fun showError(
