@@ -23,8 +23,11 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // এখানে আপনার Twelve Data API Key বসান
-    private val apiKey = "YOUR_API_KEY"
+    // IMPORTANT:
+    // এখানে আপনার আসল Twelve Data API key বসাবেন।
+    // উদাহরণ:
+    // private val apiKey = "abc123..."
+    private val apiKey = "404594e1a458416998da981e69787f31"
 
     private lateinit var btcPrice: TextView
     private lateinit var btcSignal: TextView
@@ -68,10 +71,10 @@ class MainActivity : Activity() {
     private fun loadMarketData() {
 
         btcPrice.text = "Price: loading..."
-        btcSignal.text = "WAIT"
+        btcSignal.text = "Signal: WAIT"
 
         goldPrice.text = "Price: loading..."
-        goldSignal.text = "WAIT"
+        goldSignal.text = "Signal: WAIT"
 
         Thread {
 
@@ -98,7 +101,18 @@ class MainActivity : Activity() {
 
     private fun getSignal(symbol: String): MarketResult {
 
-        return try {
+        try {
+
+            // API key check
+            if (apiKey.isBlank() ||
+                apiKey == "YOUR_API_KEY"
+            ) {
+                return MarketResult(
+                    null,
+                    "WAIT",
+                    "API key not set"
+                )
+            }
 
             val encodedSymbol =
                 URLEncoder.encode(symbol, "UTF-8")
@@ -120,67 +134,84 @@ class MainActivity : Activity() {
                 val body =
                     response.body?.string() ?: ""
 
+                // HTTP error
                 if (!response.isSuccessful) {
 
-                    if (response.code == 429) {
+                    val errorMessage = try {
+                        val errorJson = JSONObject(body)
 
-                        return MarketResult(
-                            null,
-                            "WAIT",
-                            "Rate limit - wait"
+                        errorJson.optString(
+                            "message",
+                            "HTTP ${response.code}"
                         )
+
+                    } catch (e: Exception) {
+                        "HTTP ${response.code}"
                     }
 
                     return MarketResult(
                         null,
                         "WAIT",
-                        "API error ${response.code}"
+                        "API Error ${response.code}: $errorMessage"
                     )
                 }
 
                 val json = JSONObject(body)
 
+                // Twelve Data API error
                 if (json.has("code")) {
 
                     val code =
                         json.optInt("code")
+
+                    val message =
+                        json.optString(
+                            "message",
+                            "Unknown API error"
+                        )
 
                     if (code == 429) {
 
                         return MarketResult(
                             null,
                             "WAIT",
-                            "Rate limit - wait"
+                            "Rate limit: please wait"
                         )
                     }
 
                     return MarketResult(
                         null,
                         "WAIT",
-                        json.optString(
-                            "message",
-                            "API error"
-                        )
+                        "API Error $code: $message"
                     )
                 }
 
                 val values =
                     json.optJSONArray("values")
 
-                if (values == null ||
-                    values.length() < 30
-                ) {
+                if (values == null) {
 
                     return MarketResult(
                         null,
                         "WAIT",
-                        "Not enough data"
+                        "No candle data received"
+                    )
+                }
+
+                if (values.length() < 30) {
+
+                    return MarketResult(
+                        null,
+                        "WAIT",
+                        "Not enough candle data"
                     )
                 }
 
                 val closes =
                     ArrayList<Double>()
 
+                // Twelve Data normally returns newest first.
+                // Reverse it so calculations use oldest -> newest.
                 for (i in values.length() - 1 downTo 0) {
 
                     val candle =
@@ -201,7 +232,7 @@ class MainActivity : Activity() {
                     return MarketResult(
                         null,
                         "WAIT",
-                        "Not enough candles"
+                        "Not enough valid candles"
                     )
                 }
 
@@ -227,27 +258,23 @@ class MainActivity : Activity() {
                 var buyScore = 0
                 var sellScore = 0
 
-                // EMA
+                // EMA confirmation
                 if (ema9 > ema21) {
                     buyScore++
                 } else if (ema9 < ema21) {
                     sellScore++
                 }
 
-                // RSI
-                if (rsi >= 50.0 &&
-                    rsi <= 70.0
-                ) {
+                // RSI confirmation
+                if (rsi >= 50.0 && rsi <= 70.0) {
                     buyScore++
                 }
 
-                if (rsi <= 50.0 &&
-                    rsi >= 30.0
-                ) {
+                if (rsi <= 50.0 && rsi >= 30.0) {
                     sellScore++
                 }
 
-                // Momentum
+                // Momentum confirmation
                 if (momentum > 0.03) {
                     buyScore++
                 } else if (momentum < -0.03) {
@@ -276,7 +303,7 @@ class MainActivity : Activity() {
                         "WAIT"
                 }
 
-                MarketResult(
+                return MarketResult(
                     currentPrice,
                     signal,
                     ""
@@ -285,10 +312,10 @@ class MainActivity : Activity() {
 
         } catch (e: Exception) {
 
-            MarketResult(
+            return MarketResult(
                 null,
                 "WAIT",
-                "Connection error"
+                "Connection error: ${e.message ?: "unknown"}"
             )
         }
     }
