@@ -20,9 +20,6 @@ private val client = OkHttpClient.Builder()
 
 private val handler = Handler(Looper.getMainLooper())
 
-/*
- * আপাতত BTC/USD এবং XAU/USD
- */
 private val markets = listOf(
     Market(
         "BTC/USD",
@@ -46,18 +43,12 @@ override fun onCreate(savedInstanceState: Bundle?) {
     loadAllMarkets()
 }
 
-/*
- * সব market load
- */
 private fun loadAllMarkets() {
 
     for (market in markets) {
         loadMarketData(market)
     }
 
-    /*
-     * প্রতি ১ মিনিটে update
-     */
     handler.postDelayed(object : Runnable {
 
         override fun run() {
@@ -70,9 +61,6 @@ private fun loadAllMarkets() {
     }, 60_000)
 }
 
-/*
- * Twelve Data থেকে 1-minute candles
- */
 private fun loadMarketData(market: Market) {
 
     Thread {
@@ -82,8 +70,16 @@ private fun loadMarketData(market: Market) {
             val apiKey =
                 BuildConfig.TWELVE_DATA_API_KEY
 
+            /*
+             * API key check
+             */
             if (apiKey.isBlank()) {
-                showError(market)
+
+                showError(
+                    market,
+                    "ERROR: API KEY EMPTY"
+                )
+
                 return@Thread
             }
 
@@ -91,7 +87,7 @@ private fun loadMarketData(market: Market) {
                 "https://api.twelvedata.com/time_series" +
                         "?symbol=${market.symbol}" +
                         "&interval=1min" +
-                        "&outputsize=100" +
+                        "&outputsize=50" +
                         "&apikey=$apiKey"
 
             val request =
@@ -107,45 +103,118 @@ private fun loadMarketData(market: Market) {
                     val body =
                         response.body?.string() ?: ""
 
-                    val json = try {
-                        JSONObject(body)
-                    } catch (e: Exception) {
-                        showError(market)
+                    /*
+                     * HTTP error
+                     */
+                    if (!response.isSuccessful) {
+
+                        showError(
+                            market,
+                            "HTTP ERROR: ${response.code}"
+                        )
+
                         return@use
                     }
 
+                    /*
+                     * Empty response
+                     */
+                    if (body.isBlank()) {
+
+                        showError(
+                            market,
+                            "ERROR: EMPTY RESPONSE"
+                        )
+
+                        return@use
+                    }
+
+                    /*
+                     * JSON parse
+                     */
+                    val json = try {
+
+                        JSONObject(body)
+
+                    } catch (e: Exception) {
+
+                        showError(
+                            market,
+                            "ERROR: INVALID JSON"
+                        )
+
+                        return@use
+                    }
+
+                    /*
+                     * Twelve Data error message
+                     */
+                    if (json.has("status") &&
+                        json.getString("status") == "error"
+                    ) {
+
+                        val message =
+                            json.optString(
+                                "message",
+                                "Unknown API error"
+                            )
+
+                        showError(
+                            market,
+                            "API: $message"
+                        )
+
+                        return@use
+                    }
+
+                    /*
+                     * No values
+                     */
                     if (!json.has("values")) {
-                        showError(market)
+
+                        val message =
+                            json.optString(
+                                "message",
+                                "VALUES NOT FOUND"
+                            )
+
+                        showError(
+                            market,
+                            "ERROR: $message"
+                        )
+
                         return@use
                     }
 
                     val values =
                         json.getJSONArray("values")
 
-                    if (values.length() < 30) {
-                        showError(market)
+                    if (values.length() < 22) {
+
+                        showError(
+                            market,
+                            "ERROR: NOT ENOUGH DATA"
+                        )
+
                         return@use
                     }
 
                     /*
                      * Close prices
-                     *
-                     * Twelve Data newest candle
-                     * আগে দেয়।
-                     *
-                     * তাই oldest -> newest
                      */
                     val closes =
                         mutableListOf<Double>()
 
-                    for (i in values.length() - 1 downTo 0) {
+                    for (
+                        i in values.length() - 1 downTo 0
+                    ) {
 
                         val candle =
                             values.getJSONObject(i)
 
                         val close =
                             candle
-                                .getString("close")
+                                .optString("close")
                                 .toDoubleOrNull()
 
                         if (close != null) {
@@ -153,8 +222,13 @@ private fun loadMarketData(market: Market) {
                         }
                     }
 
-                    if (closes.size < 30) {
-                        showError(market)
+                    if (closes.size < 22) {
+
+                        showError(
+                            market,
+                            "ERROR: CLOSE DATA MISSING"
+                        )
+
                         return@use
                     }
 
@@ -193,9 +267,6 @@ private fun loadMarketData(market: Market) {
 
                     /*
                      * Momentum
-                     *
-                     * শেষ candle আগের candle-এর
-                     * চেয়ে উপরে/নিচে কিনা
                      */
                     val previousPrice =
                         closes[closes.size - 2]
@@ -225,7 +296,7 @@ private fun loadMarketData(market: Market) {
                         )
 
                     /*
-                     * UI update
+                     * UI
                      */
                     runOnUiThread {
 
@@ -247,15 +318,15 @@ private fun loadMarketData(market: Market) {
 
         } catch (e: Exception) {
 
-            showError(market)
+            showError(
+                market,
+                "ERROR: ${e.message ?: "CONNECTION ERROR"}"
+            )
         }
 
     }.start()
 }
 
-/*
- * EMA calculation
- */
 private fun calculateEMA(
     prices: List<Double>,
     period: Int
@@ -281,11 +352,6 @@ private fun calculateEMA(
     return ema
 }
 
-/*
- * RSI 14
- *
- * Wilder RSI
- */
 private fun calculateRSI(
     prices: List<Double>,
     period: Int
@@ -344,31 +410,16 @@ private fun calculateRSI(
         return 100.0
     }
 
-    val relativeStrength =
+    val rs =
         averageGain / averageLoss
 
     return 100.0 -
             (
                 100.0 /
-                        (1.0 + relativeStrength)
+                        (1.0 + rs)
                 )
 }
 
-/*
- * Improved signal
- *
- * BUY:
- * EMA9 > EMA21
- * RSI 50-70
- * Momentum UP
- *
- * SELL:
- * EMA9 < EMA21
- * RSI 30-50
- * Momentum DOWN
- *
- * অন্য অবস্থায় WAIT
- */
 private fun calculateSignal(
     ema9: Double,
     ema21: Double,
@@ -397,9 +448,6 @@ private fun calculateSignal(
     }
 }
 
-/*
- * Price format
- */
 private fun formatPrice(
     price: Double
 ): String {
@@ -412,10 +460,11 @@ private fun formatPrice(
 }
 
 /*
- * Error
+ * আসল error screen-এ দেখাবে
  */
 private fun showError(
-    market: Market
+    market: Market,
+    message: String
 ) {
 
     runOnUiThread {
@@ -428,7 +477,7 @@ private fun showError(
         findViewById<TextView>(
             market.signalId
         ).text =
-            "WAIT"
+            message
     }
 }
 
