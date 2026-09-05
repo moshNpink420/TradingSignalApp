@@ -47,12 +47,15 @@ class MainActivity : Activity() {
 
     private fun loadAllMarkets() {
 
+        // BTC first
         loadMarketData(markets[0])
 
+        // XAU after 8 seconds
         handler.postDelayed({
             loadMarketData(markets[1])
         }, 8000)
 
+        // Repeat every 60 seconds
         handler.postDelayed({
             loadAllMarkets()
         }, 60000)
@@ -67,10 +70,12 @@ class MainActivity : Activity() {
                 val apiKey = BuildConfig.TWELVE_DATA_API_KEY
 
                 if (apiKey.isBlank()) {
+
                     showError(
                         market,
                         "API KEY EMPTY"
                     )
+
                     return@Thread
                 }
 
@@ -99,6 +104,17 @@ class MainActivity : Activity() {
 
                         val body =
                             response.body?.string() ?: ""
+
+                        // HTTP error
+                        if (!response.isSuccessful) {
+
+                            showError(
+                                market,
+                                "HTTP ${response.code}"
+                            )
+
+                            return@use
+                        }
 
                         if (body.isBlank()) {
 
@@ -131,7 +147,7 @@ class MainActivity : Activity() {
                                 .equals("error", true)
                         ) {
 
-                            val message =
+                            val errorMessage =
                                 json.optString(
                                     "message",
                                     "UNKNOWN API ERROR"
@@ -139,20 +155,7 @@ class MainActivity : Activity() {
 
                             showError(
                                 market,
-                                "API ERROR"
-                            )
-
-                            return@use
-                        }
-
-                        /*
-                         * HTTP error
-                         */
-                        if (!response.isSuccessful) {
-
-                            showError(
-                                market,
-                                "HTTP ${response.code}"
+                                "API: $errorMessage"
                             )
 
                             return@use
@@ -172,7 +175,17 @@ class MainActivity : Activity() {
                         }
 
                         val values =
-                            json.getJSONArray("values")
+                            json.optJSONArray("values")
+
+                        if (values == null) {
+
+                            showError(
+                                market,
+                                "VALUES ERROR"
+                            )
+
+                            return@use
+                        }
 
                         if (values.length() < 25) {
 
@@ -184,29 +197,34 @@ class MainActivity : Activity() {
                             return@use
                         }
 
+                        /*
+                         * Convert candle closes
+                         *
+                         * Twelve Data sends newest first.
+                         * We reverse it:
+                         *
+                         * oldest -> newest
+                         */
                         val closes =
                             mutableListOf<Double>()
 
-                        /*
-                         * Twelve Data returns newest candle first.
-                         *
-                         * We reverse the order so the list becomes:
-                         * oldest -> newest
-                         */
                         for (
                             i in values.length() - 1 downTo 0
                         ) {
 
                             val candle =
-                                values.getJSONObject(i)
+                                values.optJSONObject(i)
 
-                            val close =
-                                candle
-                                    .optString("close")
-                                    .toDoubleOrNull()
+                            if (candle != null) {
 
-                            if (close != null) {
-                                closes.add(close)
+                                val close =
+                                    candle
+                                        .optString("close")
+                                        .toDoubleOrNull()
+
+                                if (close != null) {
+                                    closes.add(close)
+                                }
                             }
                         }
 
@@ -265,7 +283,7 @@ class MainActivity : Activity() {
 
                                 abs(
                                     ema9 - ema21
-                                ) / ema21 * 100.0
+                                ) / abs(ema21) * 100.0
 
                             } else {
                                 0.0
@@ -382,18 +400,10 @@ class MainActivity : Activity() {
                 prices[i] - prices[i - 1]
 
             val currentGain =
-                if (change > 0) {
-                    change
-                } else {
-                    0.0
-                }
+                if (change > 0) change else 0.0
 
             val currentLoss =
-                if (change < 0) {
-                    -change
-                } else {
-                    0.0
-                }
+                if (change < 0) -change else 0.0
 
             averageGain =
                 (
@@ -458,50 +468,55 @@ class MainActivity : Activity() {
         var buyScore = 0
         var sellScore = 0
 
-        /*
-         * EMA confirmation
-         */
+        // EMA confirmation
         if (ema9 > ema21) {
+
             buyScore++
+
         } else if (ema9 < ema21) {
+
             sellScore++
         }
 
-        /*
-         * RSI confirmation
-         */
+        // RSI confirmation
         if (rsi >= 55.0 && rsi <= 68.0) {
+
             buyScore++
+
         } else if (rsi >= 32.0 && rsi <= 45.0) {
+
             sellScore++
         }
 
-        /*
-         * Momentum confirmation
-         */
+        // Momentum confirmation
         if (momentum > 0) {
+
             buyScore++
+
         } else if (momentum < 0) {
+
             sellScore++
         }
 
-        /*
-         * Trend confirmation
-         */
+        // Trend confirmation
         if (trend > 0) {
+
             buyScore++
+
         } else if (trend < 0) {
+
             sellScore++
         }
 
-        /*
-         * EMA separation confirmation
-         */
+        // EMA separation confirmation
         if (emaDifference >= 0.03) {
 
             if (ema9 > ema21) {
+
                 buyScore++
+
             } else if (ema9 < ema21) {
+
                 sellScore++
             }
         }
@@ -526,22 +541,11 @@ class MainActivity : Activity() {
         symbol: String
     ): String {
 
-        return if (symbol == "BTC/USD") {
-
-            String.format(
-                Locale.US,
-                "%.2f",
-                price
-            )
-
-        } else {
-
-            String.format(
-                Locale.US,
-                "%.2f",
-                price
-            )
-        }
+        return String.format(
+            Locale.US,
+            "%.2f",
+            price
+        )
     }
 
     private fun showError(
@@ -551,14 +555,20 @@ class MainActivity : Activity() {
 
         runOnUiThread {
 
-            findViewById<TextView>(
-                market.priceId
-            ).text =
+            val priceView =
+                findViewById<TextView>(
+                    market.priceId
+                )
+
+            val signalView =
+                findViewById<TextView>(
+                    market.signalId
+                )
+
+            priceView.text =
                 "Price: --"
 
-            findViewById<TextView>(
-                market.signalId
-            ).text =
+            signalView.text =
                 message
         }
     }
