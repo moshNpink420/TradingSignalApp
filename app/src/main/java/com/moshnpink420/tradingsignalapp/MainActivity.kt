@@ -25,8 +25,8 @@ class MainActivity : Activity() {
 
     private lateinit var btcPrice: TextView
     private lateinit var btcSignal: TextView
-    private lateinit var xauPrice: TextView
-    private lateinit var xauSignal: TextView
+    private lateinit var goldPrice: TextView
+    private lateinit var goldSignal: TextView
 
     private val handler = Handler(Looper.getMainLooper())
 
@@ -35,24 +35,21 @@ class MainActivity : Activity() {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    /*
-     * আপনার Twelve Data API key এখানে বসাবেন।
-     * উদাহরণ:
-     * private val API_KEY = "123456789abcdef"
-     */
-    private val API_KEY = "YOUR_API_KEY"
+    // এখানে আপনার Twelve Data API Key বসান
+    private val API_KEY = "404594e1a458416998da981e69787f31"
 
     private val CHANNEL_ID = "trading_signal_channel"
 
-    // একই signal বারবার notification না দেওয়ার জন্য
     private var lastBtcSignal = "WAIT"
-    private var lastXauSignal = "WAIT"
+    private var lastGoldSignal = "WAIT"
 
     private val updateRunnable = object : Runnable {
         override fun run() {
+
             updateMarket("BTC/USD")
             updateMarket("XAU/USD")
 
+            // প্রতি ১ মিনিটে update
             handler.postDelayed(this, 60_000)
         }
     }
@@ -64,15 +61,21 @@ class MainActivity : Activity() {
 
         btcPrice = findViewById(R.id.btcPrice)
         btcSignal = findViewById(R.id.btcSignal)
-        xauPrice = findViewById(R.id.xauPrice)
-        xauSignal = findViewById(R.id.xauSignal)
+
+        // আপনার XML-এ XAU-এর ID goldPrice / goldSignal
+        goldPrice = findViewById(R.id.goldPrice)
+        goldSignal = findViewById(R.id.goldSignal)
 
         createNotificationChannel()
 
+        // Android 13+ notification permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+
+            if (
+                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
                 != PackageManager.PERMISSION_GRANTED
             ) {
+
                 ActivityCompat.requestPermissions(
                     this,
                     arrayOf(Manifest.permission.POST_NOTIFICATIONS),
@@ -92,15 +95,21 @@ class MainActivity : Activity() {
     private fun updateMarket(symbol: String) {
 
         if (API_KEY == "YOUR_API_KEY") {
+
             runOnUiThread {
+
                 if (symbol == "BTC/USD") {
+
                     btcPrice.text = "Price: API KEY needed"
                     btcSignal.text = "Signal: WAIT"
+
                 } else {
-                    xauPrice.text = "Price: API KEY needed"
-                    xauSignal.text = "Signal: WAIT"
+
+                    goldPrice.text = "Price: API KEY needed"
+                    goldSignal.text = "Signal: WAIT"
                 }
             }
+
             return
         }
 
@@ -123,17 +132,28 @@ class MainActivity : Activity() {
                     .build()
 
                 val response = client.newCall(request).execute()
+
                 val body = response.body?.string()
 
                 if (body.isNullOrEmpty()) {
+
                     showError(symbol, "No data")
                     return@Thread
                 }
 
                 val json = JSONObject(body)
 
-                if (json.has("code") || json.has("status") && json.getString("status") == "error") {
-                    val message = json.optString("message", "API Error")
+                if (
+                    json.has("code") ||
+                    (
+                        json.has("status") &&
+                        json.optString("status") == "error"
+                    )
+                ) {
+
+                    val message =
+                        json.optString("message", "API Error")
+
                     showError(symbol, message)
                     return@Thread
                 }
@@ -141,6 +161,7 @@ class MainActivity : Activity() {
                 val values = json.optJSONArray("values")
 
                 if (values == null || values.length() < 25) {
+
                     showError(symbol, "Not enough data")
                     return@Thread
                 }
@@ -148,8 +169,12 @@ class MainActivity : Activity() {
                 val closes = ArrayList<Double>()
 
                 for (i in values.length() - 1 downTo 0) {
+
                     val candle = values.getJSONObject(i)
-                    closes.add(candle.getString("close").toDouble())
+
+                    closes.add(
+                        candle.getString("close").toDouble()
+                    )
                 }
 
                 val price = closes.last()
@@ -169,20 +194,28 @@ class MainActivity : Activity() {
 
                 runOnUiThread {
 
-                    val formattedPrice = if (symbol == "BTC/USD") {
-                        String.format(Locale.US, "%.2f", price)
-                    } else {
-                        String.format(Locale.US, "%.2f", price)
-                    }
+                    val formattedPrice =
+                        String.format(
+                            Locale.US,
+                            "%.2f",
+                            price
+                        )
 
                     if (symbol == "BTC/USD") {
 
-                        btcPrice.text = "Price: $formattedPrice"
-                        btcSignal.text = "Signal: $signal"
+                        btcPrice.text =
+                            "Price: $formattedPrice"
 
-                        if (signal == "BUY" || signal == "SELL") {
+                        btcSignal.text =
+                            "Signal: $signal"
+
+                        if (
+                            signal == "BUY" ||
+                            signal == "SELL"
+                        ) {
 
                             if (signal != lastBtcSignal) {
+
                                 sendNotification(
                                     "BTC/USD $signal",
                                     "Price: $formattedPrice\nSignal: $signal"
@@ -190,35 +223,48 @@ class MainActivity : Activity() {
                             }
 
                             lastBtcSignal = signal
+
                         } else {
+
                             lastBtcSignal = "WAIT"
                         }
 
                     } else {
 
-                        xauPrice.text = "Price: $formattedPrice"
-                        xauSignal.text = "Signal: $signal"
+                        goldPrice.text =
+                            "Price: $formattedPrice"
 
-                        if (signal == "BUY" || signal == "SELL") {
+                        goldSignal.text =
+                            "Signal: $signal"
 
-                            if (signal != lastXauSignal) {
+                        if (
+                            signal == "BUY" ||
+                            signal == "SELL"
+                        ) {
+
+                            if (signal != lastGoldSignal) {
+
                                 sendNotification(
                                     "XAU/USD $signal",
                                     "Price: $formattedPrice\nSignal: $signal"
                                 )
                             }
 
-                            lastXauSignal = signal
+                            lastGoldSignal = signal
 
                         } else {
-                            lastXauSignal = "WAIT"
+
+                            lastGoldSignal = "WAIT"
                         }
                     }
                 }
 
             } catch (e: Exception) {
 
-                showError(symbol, e.message ?: "Connection error")
+                showError(
+                    symbol,
+                    e.message ?: "Connection error"
+                )
             }
 
         }.start()
@@ -233,12 +279,16 @@ class MainActivity : Activity() {
             return prices.last()
         }
 
-        val multiplier = 2.0 / (period + 1)
+        val multiplier =
+            2.0 / (period + 1)
 
-        var ema = prices.take(period).average()
+        var ema =
+            prices.take(period).average()
 
         for (i in period until prices.size) {
-            ema = ((prices[i] - ema) * multiplier) + ema
+
+            ema =
+                ((prices[i] - ema) * multiplier) + ema
         }
 
         return ema
@@ -258,7 +308,8 @@ class MainActivity : Activity() {
 
         for (i in 1..period) {
 
-            val change = prices[i] - prices[i - 1]
+            val change =
+                prices[i] - prices[i - 1]
 
             if (change >= 0) {
                 gain += change
@@ -267,30 +318,45 @@ class MainActivity : Activity() {
             }
         }
 
-        var averageGain = gain / period
-        var averageLoss = loss / period
+        var averageGain =
+            gain / period
+
+        var averageLoss =
+            loss / period
 
         for (i in period + 1 until prices.size) {
 
-            val change = prices[i] - prices[i - 1]
+            val change =
+                prices[i] - prices[i - 1]
 
-            val currentGain = if (change > 0) change else 0.0
-            val currentLoss = if (change < 0) abs(change) else 0.0
+            val currentGain =
+                if (change > 0) change else 0.0
+
+            val currentLoss =
+                if (change < 0) abs(change) else 0.0
 
             averageGain =
-                ((averageGain * (period - 1)) + currentGain) / period
+                (
+                    (averageGain * (period - 1)) +
+                            currentGain
+                    ) / period
 
             averageLoss =
-                ((averageLoss * (period - 1)) + currentLoss) / period
+                (
+                    (averageLoss * (period - 1)) +
+                            currentLoss
+                    ) / period
         }
 
         if (averageLoss == 0.0) {
             return 100.0
         }
 
-        val rs = averageGain / averageLoss
+        val rs =
+            averageGain / averageLoss
 
-        return 100.0 - (100.0 / (1.0 + rs))
+        return 100.0 -
+                (100.0 / (1.0 + rs))
     }
 
     private fun calculateMomentum(
@@ -302,7 +368,8 @@ class MainActivity : Activity() {
             return 0.0
         }
 
-        return prices.last() - prices[prices.size - 1 - candles]
+        return prices.last() -
+                prices[prices.size - 1 - candles]
     }
 
     private fun calculateSignal(
@@ -325,7 +392,7 @@ class MainActivity : Activity() {
             sellScore++
         }
 
-        // Price position
+        // Price vs EMA 9
         if (price > ema9) {
             buyScore++
         }
@@ -334,7 +401,7 @@ class MainActivity : Activity() {
             sellScore++
         }
 
-        // RSI
+        // RSI confirmation
         if (rsi >= 50.0 && rsi <= 70.0) {
             buyScore++
         }
@@ -343,7 +410,7 @@ class MainActivity : Activity() {
             sellScore++
         }
 
-        // Momentum
+        // Momentum confirmation
         if (momentum > 0) {
             buyScore++
         }
@@ -353,9 +420,17 @@ class MainActivity : Activity() {
         }
 
         return when {
-            buyScore >= 3 && buyScore > sellScore -> "BUY"
-            sellScore >= 3 && sellScore > buyScore -> "SELL"
-            else -> "WAIT"
+
+            buyScore >= 3 &&
+                    buyScore > sellScore ->
+                "BUY"
+
+            sellScore >= 3 &&
+                    sellScore > buyScore ->
+                "SELL"
+
+            else ->
+                "WAIT"
         }
     }
 
@@ -367,11 +442,14 @@ class MainActivity : Activity() {
         runOnUiThread {
 
             if (symbol == "BTC/USD") {
+
                 btcPrice.text = "Price: --"
                 btcSignal.text = "Signal: WAIT"
+
             } else {
-                xauPrice.text = "Price: --"
-                xauSignal.text = "Signal: WAIT"
+
+                goldPrice.text = "Price: --"
+                goldSignal.text = "Signal: WAIT"
             }
         }
     }
@@ -386,11 +464,13 @@ class MainActivity : Activity() {
                 NotificationManager.IMPORTANCE_HIGH
             )
 
-            channel.description = "BTC/USD and XAU/USD BUY/SELL signals"
+            channel.description =
+                "BTC/USD and XAU/USD BUY/SELL signals"
 
             val manager =
-                getSystemService(Context.NOTIFICATION_SERVICE)
-                        as NotificationManager
+                getSystemService(
+                    Context.NOTIFICATION_SERVICE
+                ) as NotificationManager
 
             manager.createNotificationChannel(channel)
         }
@@ -401,29 +481,42 @@ class MainActivity : Activity() {
         message: String
     ) {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.TIRAMISU
+        ) {
 
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
+            if (
+                checkSelfPermission(
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
             ) {
                 return
             }
         }
 
         val notification =
-            NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.ic_dialog_info)
+            NotificationCompat.Builder(
+                this,
+                CHANNEL_ID
+            )
+                .setSmallIcon(
+                    android.R.drawable.ic_dialog_info
+                )
                 .setContentTitle(title)
                 .setContentText(message)
                 .setStyle(
                     NotificationCompat.BigTextStyle()
                         .bigText(message)
                 )
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setPriority(
+                    NotificationCompat.PRIORITY_HIGH
+                )
                 .setAutoCancel(true)
                 .build()
 
-        NotificationManagerCompat.from(this)
+        NotificationManagerCompat
+            .from(this)
             .notify(
                 (System.currentTimeMillis() % 100000).toInt(),
                 notification
