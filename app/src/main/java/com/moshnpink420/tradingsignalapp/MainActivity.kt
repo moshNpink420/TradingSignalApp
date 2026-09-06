@@ -36,7 +36,7 @@ class MainActivity : Activity() {
         .build()
 
     // আপনার Twelve Data API Key
-    private val API_KEY = "YOUR_API_KEY"
+    private val API_KEY = "404594e1a458416998da981e69787f31"
 
     private val CHANNEL_ID = "trading_signal_channel"
 
