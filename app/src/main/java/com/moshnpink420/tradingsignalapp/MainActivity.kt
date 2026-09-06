@@ -23,10 +23,7 @@ class MainActivity : Activity() {
 
     private val handler = Handler(Looper.getMainLooper())
 
-    // IMPORTANT:
-    // এখানে আপনার আসল Twelve Data API key বসাবেন।
-    // উদাহরণ:
-    // private val apiKey = "abc123..."
+    // আপনার Twelve Data API key এখানে বসান
     private val apiKey = "404594e1a458416998da981e69787f31"
 
     private lateinit var btcPrice: TextView
@@ -35,10 +32,11 @@ class MainActivity : Activity() {
     private lateinit var goldPrice: TextView
     private lateinit var goldSignal: TextView
 
+    // প্রতি ৫ মিনিটে update
     private val updateRunnable = object : Runnable {
         override fun run() {
             loadMarketData()
-            handler.postDelayed(this, 120000)
+            handler.postDelayed(this, 300000)
         }
     }
 
@@ -60,7 +58,7 @@ class MainActivity : Activity() {
         super.onResume()
 
         handler.removeCallbacks(updateRunnable)
-        handler.postDelayed(updateRunnable, 120000)
+        handler.postDelayed(updateRunnable, 300000)
     }
 
     override fun onPause() {
@@ -103,7 +101,6 @@ class MainActivity : Activity() {
 
         try {
 
-            // API key check
             if (apiKey.isBlank() ||
                 apiKey == "YOUR_API_KEY"
             ) {
@@ -134,11 +131,12 @@ class MainActivity : Activity() {
                 val body =
                     response.body?.string() ?: ""
 
-                // HTTP error
                 if (!response.isSuccessful) {
 
                     val errorMessage = try {
-                        val errorJson = JSONObject(body)
+
+                        val errorJson =
+                            JSONObject(body)
 
                         errorJson.optString(
                             "message",
@@ -146,6 +144,7 @@ class MainActivity : Activity() {
                         )
 
                     } catch (e: Exception) {
+
                         "HTTP ${response.code}"
                     }
 
@@ -156,9 +155,9 @@ class MainActivity : Activity() {
                     )
                 }
 
-                val json = JSONObject(body)
+                val json =
+                    JSONObject(body)
 
-                // Twelve Data API error
                 if (json.has("code")) {
 
                     val code =
@@ -210,8 +209,7 @@ class MainActivity : Activity() {
                 val closes =
                     ArrayList<Double>()
 
-                // Twelve Data normally returns newest first.
-                // Reverse it so calculations use oldest -> newest.
+                // Oldest -> newest
                 for (i in values.length() - 1 downTo 0) {
 
                     val candle =
@@ -258,50 +256,55 @@ class MainActivity : Activity() {
                 var buyScore = 0
                 var sellScore = 0
 
-                // EMA confirmation
+                // EMA
                 if (ema9 > ema21) {
                     buyScore++
                 } else if (ema9 < ema21) {
                     sellScore++
                 }
 
-                // RSI confirmation
-                if (rsi >= 50.0 && rsi <= 70.0) {
+                // RSI
+                if (rsi >= 50.0 &&
+                    rsi <= 70.0
+                ) {
                     buyScore++
                 }
 
-                if (rsi <= 50.0 && rsi >= 30.0) {
+                if (rsi <= 50.0 &&
+                    rsi >= 30.0
+                ) {
                     sellScore++
                 }
 
-                // Momentum confirmation
+                // Momentum
                 if (momentum > 0.03) {
                     buyScore++
                 } else if (momentum < -0.03) {
                     sellScore++
                 }
 
-                val signal = when {
+                val signal =
+                    when {
 
-                    buyScore >= 3 &&
-                            buyScore > sellScore ->
-                        "STRONG BUY"
+                        buyScore >= 3 &&
+                                buyScore > sellScore ->
+                            "STRONG BUY"
 
-                    sellScore >= 3 &&
-                            sellScore > buyScore ->
-                        "STRONG SELL"
+                        sellScore >= 3 &&
+                                sellScore > buyScore ->
+                            "STRONG SELL"
 
-                    buyScore >= 2 &&
-                            buyScore > sellScore ->
-                        "BUY"
+                        buyScore >= 2 &&
+                                buyScore > sellScore ->
+                            "BUY"
 
-                    sellScore >= 2 &&
-                            sellScore > buyScore ->
-                        "SELL"
+                        sellScore >= 2 &&
+                                sellScore > buyScore ->
+                            "SELL"
 
-                    else ->
-                        "WAIT"
-                }
+                        else ->
+                            "WAIT"
+                    }
 
                 return MarketResult(
                     currentPrice,
