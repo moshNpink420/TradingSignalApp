@@ -35,8 +35,8 @@ class MainActivity : Activity() {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    // এখানে আপনার Twelve Data API Key বসান
-    private val API_KEY = "404594e1a458416998da981e69787f31"
+    // আপনার Twelve Data API Key
+    private val API_KEY = "YOUR_API_KEY"
 
     private val CHANNEL_ID = "trading_signal_channel"
 
@@ -45,11 +45,10 @@ class MainActivity : Activity() {
 
     private val updateRunnable = object : Runnable {
         override fun run() {
-
             updateMarket("BTC/USD")
             updateMarket("XAU/USD")
 
-            // প্রতি ১ মিনিটে update
+            // প্রতি ১ মিনিটে market data check
             handler.postDelayed(this, 60_000)
         }
     }
@@ -62,18 +61,17 @@ class MainActivity : Activity() {
         btcPrice = findViewById(R.id.btcPrice)
         btcSignal = findViewById(R.id.btcSignal)
 
-        // আপনার XML-এ XAU-এর ID goldPrice / goldSignal
         goldPrice = findViewById(R.id.goldPrice)
         goldSignal = findViewById(R.id.goldSignal)
 
         createNotificationChannel()
 
-        // Android 13+ notification permission
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
 
             if (
-                checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
+                checkSelfPermission(
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
             ) {
 
                 ActivityCompat.requestPermissions(
@@ -99,12 +97,9 @@ class MainActivity : Activity() {
             runOnUiThread {
 
                 if (symbol == "BTC/USD") {
-
                     btcPrice.text = "Price: API KEY needed"
                     btcSignal.text = "Signal: WAIT"
-
                 } else {
-
                     goldPrice.text = "Price: API KEY needed"
                     goldSignal.text = "Signal: WAIT"
                 }
@@ -117,7 +112,8 @@ class MainActivity : Activity() {
 
             try {
 
-                val encodedSymbol = symbol.replace("/", "%2F")
+                val encodedSymbol =
+                    symbol.replace("/", "%2F")
 
                 val url =
                     "https://api.twelvedata.com/time_series" +
@@ -131,13 +127,14 @@ class MainActivity : Activity() {
                     .get()
                     .build()
 
-                val response = client.newCall(request).execute()
+                val response =
+                    client.newCall(request).execute()
 
-                val body = response.body?.string()
+                val body =
+                    response.body?.string()
 
                 if (body.isNullOrEmpty()) {
-
-                    showError(symbol, "No data")
+                    showError(symbol)
                     return@Thread
                 }
 
@@ -150,27 +147,46 @@ class MainActivity : Activity() {
                         json.optString("status") == "error"
                     )
                 ) {
-
-                    val message =
-                        json.optString("message", "API Error")
-
-                    showError(symbol, message)
+                    showError(symbol)
                     return@Thread
                 }
 
-                val values = json.optJSONArray("values")
+                val values =
+                    json.optJSONArray("values")
 
-                if (values == null || values.length() < 25) {
-
-                    showError(symbol, "Not enough data")
+                if (
+                    values == null ||
+                    values.length() < 30
+                ) {
+                    showError(symbol)
                     return@Thread
                 }
 
                 val closes = ArrayList<Double>()
+                val opens = ArrayList<Double>()
+                val highs = ArrayList<Double>()
+                val lows = ArrayList<Double>()
 
+                /*
+                 * Twelve Data সাধারণত newest candle আগে দেয়।
+                 * তাই oldest -> newest করা হচ্ছে।
+                 */
                 for (i in values.length() - 1 downTo 0) {
 
-                    val candle = values.getJSONObject(i)
+                    val candle =
+                        values.getJSONObject(i)
+
+                    opens.add(
+                        candle.getString("open").toDouble()
+                    )
+
+                    highs.add(
+                        candle.getString("high").toDouble()
+                    )
+
+                    lows.add(
+                        candle.getString("low").toDouble()
+                    )
 
                     closes.add(
                         candle.getString("close").toDouble()
@@ -179,18 +195,29 @@ class MainActivity : Activity() {
 
                 val price = closes.last()
 
-                val ema9 = calculateEMA(closes, 9)
-                val ema21 = calculateEMA(closes, 21)
-                val rsi = calculateRSI(closes, 14)
-                val momentum = calculateMomentum(closes, 5)
+                val ema9 =
+                    calculateEMA(closes, 9)
 
-                val signal = calculateSignal(
-                    price,
-                    ema9,
-                    ema21,
-                    rsi,
-                    momentum
-                )
+                val ema21 =
+                    calculateEMA(closes, 21)
+
+                val rsi =
+                    calculateRSI(closes, 14)
+
+                val momentum =
+                    calculateMomentum(closes, 5)
+
+                val signal =
+                    calculateStrongSignal(
+                        closes,
+                        opens,
+                        highs,
+                        lows,
+                        ema9,
+                        ema21,
+                        rsi,
+                        momentum
+                    )
 
                 runOnUiThread {
 
@@ -210,24 +237,18 @@ class MainActivity : Activity() {
                             "Signal: $signal"
 
                         if (
-                            signal == "BUY" ||
-                            signal == "SELL"
+                            (signal == "BUY" ||
+                             signal == "SELL") &&
+                            signal != lastBtcSignal
                         ) {
 
-                            if (signal != lastBtcSignal) {
-
-                                sendNotification(
-                                    "BTC/USD $signal",
-                                    "Price: $formattedPrice\nSignal: $signal"
-                                )
-                            }
-
-                            lastBtcSignal = signal
-
-                        } else {
-
-                            lastBtcSignal = "WAIT"
+                            sendNotification(
+                                "BTC/USD $signal",
+                                "Price: $formattedPrice\nSignal: $signal"
+                            )
                         }
+
+                        lastBtcSignal = signal
 
                     } else {
 
@@ -238,36 +259,252 @@ class MainActivity : Activity() {
                             "Signal: $signal"
 
                         if (
-                            signal == "BUY" ||
-                            signal == "SELL"
+                            (signal == "BUY" ||
+                             signal == "SELL") &&
+                            signal != lastGoldSignal
                         ) {
 
-                            if (signal != lastGoldSignal) {
-
-                                sendNotification(
-                                    "XAU/USD $signal",
-                                    "Price: $formattedPrice\nSignal: $signal"
-                                )
-                            }
-
-                            lastGoldSignal = signal
-
-                        } else {
-
-                            lastGoldSignal = "WAIT"
+                            sendNotification(
+                                "XAU/USD $signal",
+                                "Price: $formattedPrice\nSignal: $signal"
+                            )
                         }
+
+                        lastGoldSignal = signal
                     }
                 }
 
             } catch (e: Exception) {
 
-                showError(
-                    symbol,
-                    e.message ?: "Connection error"
-                )
+                showError(symbol)
             }
 
         }.start()
+    }
+
+    /*
+     * STRONG SIGNAL ENGINE
+     *
+     * Confirmation:
+     * 1. EMA trend
+     * 2. Price position
+     * 3. RSI
+     * 4. Momentum
+     * 5. Pullback
+     * 6. Candle confirmation
+     */
+    private fun calculateStrongSignal(
+        closes: List<Double>,
+        opens: List<Double>,
+        highs: List<Double>,
+        lows: List<Double>,
+        ema9: Double,
+        ema21: Double,
+        rsi: Double,
+        momentum: Double
+    ): String {
+
+        if (closes.size < 30) {
+            return "WAIT"
+        }
+
+        val price = closes.last()
+
+        val previousClose =
+            closes[closes.size - 2]
+
+        val previousEma9 =
+            calculateEMA(
+                closes.dropLast(1),
+                9
+            )
+
+        val previousEma21 =
+            calculateEMA(
+                closes.dropLast(1),
+                21
+            )
+
+        var buyScore = 0
+        var sellScore = 0
+
+        // ------------------------------------------------
+        // 1. EMA TREND
+        // ------------------------------------------------
+
+        if (ema9 > ema21) {
+            buyScore++
+        }
+
+        if (ema9 < ema21) {
+            sellScore++
+        }
+
+        // ------------------------------------------------
+        // 2. EMA TREND STRENGTH
+        // ------------------------------------------------
+
+        if (
+            ema9 > ema21 &&
+            ema9 > previousEma9
+        ) {
+            buyScore++
+        }
+
+        if (
+            ema9 < ema21 &&
+            ema9 < previousEma9
+        ) {
+            sellScore++
+        }
+
+        // ------------------------------------------------
+        // 3. PRICE POSITION
+        // ------------------------------------------------
+
+        if (price > ema9) {
+            buyScore++
+        }
+
+        if (price < ema9) {
+            sellScore++
+        }
+
+        // ------------------------------------------------
+        // 4. RSI CONFIRMATION
+        // ------------------------------------------------
+
+        if (rsi >= 52.0 && rsi <= 68.0) {
+            buyScore++
+        }
+
+        if (rsi <= 48.0 && rsi >= 32.0) {
+            sellScore++
+        }
+
+        // Extreme RSI = avoid chasing
+        if (rsi > 72.0) {
+            buyScore--
+        }
+
+        if (rsi < 28.0) {
+            sellScore--
+        }
+
+        // ------------------------------------------------
+        // 5. MOMENTUM
+        // ------------------------------------------------
+
+        if (momentum > 0) {
+            buyScore++
+        }
+
+        if (momentum < 0) {
+            sellScore++
+        }
+
+        // ------------------------------------------------
+        // 6. PULLBACK CONFIRMATION
+        // ------------------------------------------------
+
+        val previousDistance =
+            previousClose - previousEma9
+
+        val currentDistance =
+            price - ema9
+
+        /*
+         * Bullish pullback:
+         * previous candle was near/below EMA9
+         * current price recovered above EMA9
+         */
+        if (
+            ema9 > ema21 &&
+            previousDistance <= 0 &&
+            currentDistance > 0
+        ) {
+            buyScore += 2
+        }
+
+        /*
+         * Bearish pullback:
+         * previous candle was near/above EMA9
+         * current price moved below EMA9
+         */
+        if (
+            ema9 < ema21 &&
+            previousDistance >= 0 &&
+            currentDistance < 0
+        ) {
+            sellScore += 2
+        }
+
+        // ------------------------------------------------
+        // 7. LAST CANDLE CONFIRMATION
+        // ------------------------------------------------
+
+        val lastOpen =
+            opens.last()
+
+        val lastHigh =
+            highs.last()
+
+        val lastLow =
+            lows.last()
+
+        val lastClose =
+            closes.last()
+
+        val candleBody =
+            abs(lastClose - lastOpen)
+
+        val upperWick =
+            lastHigh - maxOf(lastOpen, lastClose)
+
+        val lowerWick =
+            minOf(lastOpen, lastClose) - lastLow
+
+        // Bullish candle
+        if (
+            lastClose > lastOpen &&
+            candleBody > 0 &&
+            lowerWick <= candleBody * 1.5
+        ) {
+            buyScore++
+        }
+
+        // Bearish candle
+        if (
+            lastClose < lastOpen &&
+            candleBody > 0 &&
+            upperWick <= candleBody * 1.5
+        ) {
+            sellScore++
+        }
+
+        // ------------------------------------------------
+        // FINAL DECISION
+        // ------------------------------------------------
+
+        /*
+         * Minimum 4 confirmations.
+         *
+         * Stronger side must also be ahead
+         * by at least 1 point.
+         */
+        return when {
+
+            buyScore >= 4 &&
+                    buyScore > sellScore ->
+                "BUY"
+
+            sellScore >= 4 &&
+                    sellScore > buyScore ->
+                "SELL"
+
+            else ->
+                "WAIT"
+        }
     }
 
     private fun calculateEMA(
@@ -288,7 +525,8 @@ class MainActivity : Activity() {
         for (i in period until prices.size) {
 
             ema =
-                ((prices[i] - ema) * multiplier) + ema
+                ((prices[i] - ema) * multiplier) +
+                        ema
         }
 
         return ema
@@ -324,7 +562,9 @@ class MainActivity : Activity() {
         var averageLoss =
             loss / period
 
-        for (i in period + 1 until prices.size) {
+        for (
+            i in period + 1 until prices.size
+        ) {
 
             val change =
                 prices[i] - prices[i - 1]
@@ -337,13 +577,13 @@ class MainActivity : Activity() {
 
             averageGain =
                 (
-                    (averageGain * (period - 1)) +
+                    averageGain * (period - 1) +
                             currentGain
                     ) / period
 
             averageLoss =
                 (
-                    (averageLoss * (period - 1)) +
+                    averageLoss * (period - 1) +
                             currentLoss
                     ) / period
         }
@@ -372,72 +612,7 @@ class MainActivity : Activity() {
                 prices[prices.size - 1 - candles]
     }
 
-    private fun calculateSignal(
-        price: Double,
-        ema9: Double,
-        ema21: Double,
-        rsi: Double,
-        momentum: Double
-    ): String {
-
-        var buyScore = 0
-        var sellScore = 0
-
-        // EMA trend
-        if (ema9 > ema21) {
-            buyScore++
-        }
-
-        if (ema9 < ema21) {
-            sellScore++
-        }
-
-        // Price vs EMA 9
-        if (price > ema9) {
-            buyScore++
-        }
-
-        if (price < ema9) {
-            sellScore++
-        }
-
-        // RSI confirmation
-        if (rsi >= 50.0 && rsi <= 70.0) {
-            buyScore++
-        }
-
-        if (rsi <= 50.0 && rsi >= 30.0) {
-            sellScore++
-        }
-
-        // Momentum confirmation
-        if (momentum > 0) {
-            buyScore++
-        }
-
-        if (momentum < 0) {
-            sellScore++
-        }
-
-        return when {
-
-            buyScore >= 3 &&
-                    buyScore > sellScore ->
-                "BUY"
-
-            sellScore >= 3 &&
-                    sellScore > buyScore ->
-                "SELL"
-
-            else ->
-                "WAIT"
-        }
-    }
-
-    private fun showError(
-        symbol: String,
-        message: String
-    ) {
+    private fun showError(symbol: String) {
 
         runOnUiThread {
 
@@ -456,13 +631,16 @@ class MainActivity : Activity() {
 
     private fun createNotificationChannel() {
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.O
+        ) {
 
-            val channel = NotificationChannel(
-                CHANNEL_ID,
-                "Trading Signals",
-                NotificationManager.IMPORTANCE_HIGH
-            )
+            val channel =
+                NotificationChannel(
+                    CHANNEL_ID,
+                    "Trading Signals",
+                    NotificationManager.IMPORTANCE_HIGH
+                )
 
             channel.description =
                 "BTC/USD and XAU/USD BUY/SELL signals"
