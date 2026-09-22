@@ -38,8 +38,9 @@ class MainActivity : Activity() {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    // আপনার আগের Twelve Data API Key
-    private val API_KEY = "404594e1a458416998da981e69787f31"
+    // IMPORTANT:
+    // এখানে আপনার আগের API key রাখুন।
+    private val API_KEY = "YOUR_EXISTING_API_KEY"
 
     private val CHANNEL_ID = "trading_signal_channel"
 
@@ -47,7 +48,7 @@ class MainActivity : Activity() {
     private var lastGoldSignal = "WAIT"
 
     /*
-     * প্রতি 5 মিনিটে market data update।
+     * প্রতি 5 মিনিটে market data update
      */
     private val updateRunnable = object : Runnable {
 
@@ -104,9 +105,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
 
-        handler.removeCallbacks(
-            updateRunnable
-        )
+        handler.removeCallbacks(updateRunnable)
 
         super.onDestroy()
     }
@@ -117,7 +116,8 @@ class MainActivity : Activity() {
 
         if (
             API_KEY.isBlank() ||
-            API_KEY == "YOUR_API_KEY"
+            API_KEY == "404594e1a458416998da981e69787f31" ||
+            API_KEY == "404594e1a458416998da981e69787f31"
         ) {
 
             showError(
@@ -157,9 +157,6 @@ class MainActivity : Activity() {
                         response.body?.string()
                             .orEmpty()
 
-                    /*
-                     * HTTP error এখন সরাসরি দেখানো হবে।
-                     */
                     if (!response.isSuccessful) {
 
                         val error =
@@ -186,9 +183,6 @@ class MainActivity : Activity() {
                     val json =
                         JSONObject(body)
 
-                    /*
-                     * Twelve Data API error
-                     */
                     if (
                         json.optString("status")
                             .equals(
@@ -210,9 +204,7 @@ class MainActivity : Activity() {
                     }
 
                     val values =
-                        json.optJSONArray(
-                            "values"
-                        )
+                        json.optJSONArray("values")
 
                     if (
                         values == null ||
@@ -245,7 +237,7 @@ class MainActivity : Activity() {
                     /*
                      * Twelve Data newest candle আগে দেয়।
                      *
-                     * তাই oldest -> newest।
+                     * তাই oldest -> newest
                      */
                     for (
                         i in values.length() - 1 downTo 0
@@ -255,30 +247,26 @@ class MainActivity : Activity() {
                             values.getJSONObject(i)
 
                         opens.add(
-                            candle.optString(
-                                "open"
-                            ).toDoubleOrNull()
+                            candle.optString("open")
+                                .toDoubleOrNull()
                                 ?: 0.0
                         )
 
                         highs.add(
-                            candle.optString(
-                                "high"
-                            ).toDoubleOrNull()
+                            candle.optString("high")
+                                .toDoubleOrNull()
                                 ?: 0.0
                         )
 
                         lows.add(
-                            candle.optString(
-                                "low"
-                            ).toDoubleOrNull()
+                            candle.optString("low")
+                                .toDoubleOrNull()
                                 ?: 0.0
                         )
 
                         closes.add(
-                            candle.optString(
-                                "close"
-                            ).toDoubleOrNull()
+                            candle.optString("close")
+                                .toDoubleOrNull()
                                 ?: 0.0
                         )
 
@@ -290,12 +278,6 @@ class MainActivity : Activity() {
                         )
                     }
 
-                    /*
-                     * এটি সর্বশেষ 5-minute candle-এর
-                     * close price।
-                     *
-                     * এটি live tick price নয়।
-                     */
                     val price =
                         closes.last()
 
@@ -326,6 +308,34 @@ class MainActivity : Activity() {
                             5
                         )
 
+                    /*
+                     * SUPPORT / RESISTANCE
+                     */
+                    val support =
+                        calculateSupport(
+                            lows
+                        )
+
+                    val resistance =
+                        calculateResistance(
+                            highs
+                        )
+
+                    /*
+                     * LIQUIDITY
+                     */
+                    val liquidity =
+                        detectLiquidity(
+                            opens,
+                            highs,
+                            lows,
+                            closes
+                        )
+
+                    /*
+                     * Existing signal engine
+                     * + liquidity filter
+                     */
                     val signal =
                         calculateStrongSignal(
                             closes,
@@ -335,7 +345,8 @@ class MainActivity : Activity() {
                             ema9,
                             ema21,
                             rsi,
-                            momentum
+                            momentum,
+                            liquidity
                         )
 
                     val details =
@@ -348,7 +359,11 @@ class MainActivity : Activity() {
                             ema21,
                             rsi,
                             momentum,
-                            latestCandleTime
+                            latestCandleTime,
+                            support,
+                            resistance,
+                            liquidity,
+                            signal
                         )
 
                     runOnUiThread {
@@ -431,7 +446,7 @@ class MainActivity : Activity() {
                             (
                                 e.message
                                     ?: "Unknown error"
-                            )
+                                )
                 )
             }
 
@@ -439,52 +454,252 @@ class MainActivity : Activity() {
     }
 
     /*
-     * Twelve Data error response থেকে
-     * readable message বের করা।
+     * ============================================================
+     * SUPPORT
+     * ============================================================
+     *
+     * সর্বশেষ 20টি completed/available candle-এর
+     * মধ্যে সবচেয়ে নিচের low support হিসেবে নেওয়া হচ্ছে।
      */
-    private fun extractApiError(
-        body: String
-    ): String {
+    private fun calculateSupport(
+        lows: List<Double>
+    ): Double {
 
-        if (body.isBlank()) {
-            return "Empty response"
+        if (lows.size < 5) {
+            return 0.0
         }
 
-        return try {
+        val lookback =
+            minOf(
+                20,
+                lows.size - 1
+            )
 
-            val json =
-                JSONObject(body)
+        val start =
+            lows.size -
+                    1 -
+                    lookback
 
-            val message =
-                json.optString("message")
+        var support =
+            Double.MAX_VALUE
 
-            val code =
-                json.optString("code")
+        for (
+            i in start until lows.size - 1
+        ) {
 
-            when {
-
-                message.isNotBlank() &&
-                        code.isNotBlank() ->
-                    "$code - $message"
-
-                message.isNotBlank() ->
-                    message
-
-                code.isNotBlank() ->
-                    "Code $code"
-
-                else ->
-                    body.take(180)
+            if (lows[i] < support) {
+                support = lows[i]
             }
+        }
 
-        } catch (e: Exception) {
-
-            body.take(180)
+        return if (
+            support == Double.MAX_VALUE
+        ) {
+            0.0
+        } else {
+            support
         }
     }
 
     /*
+     * ============================================================
+     * RESISTANCE
+     * ============================================================
+     *
+     * সর্বশেষ 20টি candle-এর মধ্যে
+     * সবচেয়ে উপরের high resistance হিসেবে নেওয়া হচ্ছে।
+     */
+    private fun calculateResistance(
+        highs: List<Double>
+    ): Double {
+
+        if (highs.size < 5) {
+            return 0.0
+        }
+
+        val lookback =
+            minOf(
+                20,
+                highs.size - 1
+            )
+
+        val start =
+            highs.size -
+                    1 -
+                    lookback
+
+        var resistance =
+            Double.MIN_VALUE
+
+        for (
+            i in start until highs.size - 1
+        ) {
+
+            if (highs[i] > resistance) {
+                resistance = highs[i]
+            }
+        }
+
+        return if (
+            resistance == Double.MIN_VALUE
+        ) {
+            0.0
+        } else {
+            resistance
+        }
+    }
+
+    /*
+     * ============================================================
+     * LIQUIDITY DATA CLASS
+     * ============================================================
+     */
+    private data class LiquidityResult(
+        val sellSideSweep: Boolean,
+        val buySideSweep: Boolean,
+        val text: String
+    )
+
+    /*
+     * ============================================================
+     * LIQUIDITY DETECTION
+     * ============================================================
+     *
+     * Sell-side liquidity:
+     *
+     * Current candle low
+     *      ↓
+     * previous low-এর নিচে
+     *      ↓
+     * কিন্তু candle close আবার previous low-এর ওপরে
+     *
+     * = Sell-side liquidity sweep
+     *
+     * Buy-side liquidity:
+     *
+     * Current candle high
+     *      ↑
+     * previous high-এর ওপরে
+     *      ↑
+     * কিন্তু candle close আবার previous high-এর নিচে
+     *
+     * = Buy-side liquidity sweep
+     */
+    private fun detectLiquidity(
+        opens: List<Double>,
+        highs: List<Double>,
+        lows: List<Double>,
+        closes: List<Double>
+    ): LiquidityResult {
+
+        if (closes.size < 10) {
+
+            return LiquidityResult(
+                false,
+                false,
+                "Not enough data"
+            )
+        }
+
+        val lastIndex =
+            closes.size - 1
+
+        val previousEnd =
+            lastIndex
+
+        val lookback =
+            minOf(
+                20,
+                previousEnd
+            )
+
+        val start =
+            previousEnd -
+                    lookback
+
+        var previousLow =
+            Double.MAX_VALUE
+
+        var previousHigh =
+            Double.MIN_VALUE
+
+        for (
+            i in start until previousEnd
+        ) {
+
+            if (lows[i] < previousLow) {
+                previousLow = lows[i]
+            }
+
+            if (highs[i] > previousHigh) {
+                previousHigh = highs[i]
+            }
+        }
+
+        val currentHigh =
+            highs[lastIndex]
+
+        val currentLow =
+            lows[lastIndex]
+
+        val currentClose =
+            closes[lastIndex]
+
+        val sellSideSweep =
+            previousLow != Double.MAX_VALUE &&
+                    currentLow < previousLow &&
+                    currentClose > previousLow
+
+        val buySideSweep =
+            previousHigh != Double.MIN_VALUE &&
+                    currentHigh > previousHigh &&
+                    currentClose < previousHigh
+
+        val text =
+            when {
+
+                sellSideSweep &&
+                        buySideSweep ->
+                    "Both-side sweep"
+
+                sellSideSweep ->
+                    "Sell-side liquidity swept"
+
+                buySideSweep ->
+                    "Buy-side liquidity swept"
+
+                else ->
+                    "No liquidity sweep"
+            }
+
+        return LiquidityResult(
+            sellSideSweep,
+            buySideSweep,
+            text
+        )
+    }
+
+    /*
+     * ============================================================
      * STRONG SIGNAL ENGINE
+     * ============================================================
+     *
+     * আগের scoring system রাখা হয়েছে।
+     *
+     * Maximum:
+     *
+     * EMA trend       = 1
+     * EMA strength    = 1
+     * Price position  = 1
+     * RSI             = 1
+     * Momentum        = 1
+     * Pullback        = 2
+     * Candle          = 1
+     *
+     * TOTAL = 8
+     *
+     * Liquidity এখানে আলাদা confirmation/filter।
+     * এতে Signal Strength 8-এর বেশি হবে না।
      */
     private fun calculateStrongSignal(
         closes: List<Double>,
@@ -494,7 +709,8 @@ class MainActivity : Activity() {
         ema9: Double,
         ema21: Double,
         rsi: Double,
-        momentum: Double
+        momentum: Double,
+        liquidity: LiquidityResult
     ): String {
 
         if (closes.size < 30) {
@@ -666,6 +882,37 @@ class MainActivity : Activity() {
             sellScore++
         }
 
+        /*
+         * LIQUIDITY FILTER
+         *
+         * Sell-side sweep + bullish conditions
+         * = BUY-এর জন্য supportive
+         *
+         * Buy-side sweep + bearish conditions
+         * = SELL-এর জন্য supportive
+         *
+         * কিন্তু যদি liquidity sweep signal-এর
+         * বিপরীত direction দেখায়, WAIT করা হবে।
+         */
+
+        if (
+            buyScore >= 4 &&
+            buyScore > sellScore &&
+            liquidity.buySideSweep &&
+            !liquidity.sellSideSweep
+        ) {
+            return "WAIT"
+        }
+
+        if (
+            sellScore >= 4 &&
+            sellScore > buyScore &&
+            liquidity.sellSideSweep &&
+            !liquidity.buySideSweep
+        ) {
+            return "WAIT"
+        }
+
         return when {
 
             buyScore >= 4 &&
@@ -682,7 +929,9 @@ class MainActivity : Activity() {
     }
 
     /*
+     * ============================================================
      * SIGNAL DETAILS
+     * ============================================================
      */
     private fun calculateSignalDetails(
         closes: List<Double>,
@@ -693,7 +942,11 @@ class MainActivity : Activity() {
         ema21: Double,
         rsi: Double,
         momentum: Double,
-        latestCandleTime: String
+        latestCandleTime: String,
+        support: Double,
+        resistance: Double,
+        liquidity: LiquidityResult,
+        signal: String
     ): String {
 
         if (closes.size < 30) {
@@ -719,7 +972,7 @@ class MainActivity : Activity() {
         var buyScore = 0
         var sellScore = 0
 
-        // EMA trend
+        // EMA TREND
 
         val emaTrend: String
 
@@ -738,7 +991,7 @@ class MainActivity : Activity() {
             emaTrend = "Neutral"
         }
 
-        // EMA strength
+        // EMA STRENGTH
 
         val emaStrength: String
 
@@ -763,7 +1016,7 @@ class MainActivity : Activity() {
             emaStrength = "Weak/Flat"
         }
 
-        // Price position
+        // PRICE POSITION
 
         val pricePosition: String
 
@@ -833,7 +1086,7 @@ class MainActivity : Activity() {
                 "Neutral"
         }
 
-        // Momentum
+        // MOMENTUM
 
         val momentumStatus: String
 
@@ -857,7 +1110,7 @@ class MainActivity : Activity() {
                 "Flat"
         }
 
-        // Pullback
+        // PULLBACK
 
         val previousDistance =
             previousClose -
@@ -897,7 +1150,7 @@ class MainActivity : Activity() {
                 "No fresh pullback"
         }
 
-        // Candle
+        // CANDLE
 
         val lastOpen =
             opens.last()
@@ -963,14 +1216,118 @@ class MainActivity : Activity() {
                 "Weak/Neutral"
         }
 
+        /*
+         * SIGNAL STRENGTH
+         *
+         * Existing maximum = 8
+         */
         val signalStrength =
             maxOf(
                 buyScore,
                 sellScore
+            ).coerceIn(
+                0,
+                8
             )
+
+        /*
+         * SUPPORT / RESISTANCE TEXT
+         */
+        val supportText =
+            if (support > 0) {
+
+                String.format(
+                    Locale.US,
+                    "%.2f",
+                    support
+                )
+
+            } else {
+                "--"
+            }
+
+        val resistanceText =
+            if (resistance > 0) {
+
+                String.format(
+                    Locale.US,
+                    "%.2f",
+                    resistance
+                )
+
+            } else {
+                "--"
+            }
+
+        /*
+         * Distance from S/R
+         */
+        val supportDistanceText =
+            if (support > 0) {
+
+                val distance =
+                    (
+                        (price - support) /
+                                support
+                        ) * 100.0
+
+                String.format(
+                    Locale.US,
+                    "%.2f%% above",
+                    distance
+                )
+
+            } else {
+                "--"
+            }
+
+        val resistanceDistanceText =
+            if (resistance > 0) {
+
+                val distance =
+                    (
+                        (resistance - price) /
+                                resistance
+                        ) * 100.0
+
+                String.format(
+                    Locale.US,
+                    "%.2f%% below",
+                    distance
+                )
+
+            } else {
+                "--"
+            }
+
+        /*
+         * Signal strength label
+         */
+        val strengthLabel =
+            when {
+
+                signalStrength >= 8 ->
+                    "VERY STRONG"
+
+                signalStrength == 7 ->
+                    "STRONG"
+
+                signalStrength == 6 ->
+                    "GOOD"
+
+                signalStrength == 5 ->
+                    "MODERATE"
+
+                signalStrength == 4 ->
+                    "WEAK"
+
+                else ->
+                    "WAIT"
+            }
 
         return String.format(
             Locale.US,
+
             "Confirmation Details:\n" +
                     "5m Candle: %s\n" +
                     "EMA 9/21: %s\n" +
@@ -980,20 +1337,56 @@ class MainActivity : Activity() {
                     "Momentum: %s\n" +
                     "Pullback: %s\n" +
                     "Candle: %s\n" +
-                    "Signal Strength: %d",
+                    "\n" +
+                    "Support: %s (%s)\n" +
+                    "Resistance: %s (%s)\n" +
+                    "Liquidity: %s\n" +
+                    "\n" +
+                    "Signal: %s\n" +
+                    "Signal Strength: %d/8\n" +
+                    "Strength: %s",
+
             latestCandleTime,
+
             emaTrend,
+
             emaStrength,
+
             pricePosition,
+
             rsiText,
+
             rsiStatus,
+
             momentumStatus,
+
             pullbackStatus,
+
             candleStatus,
-            signalStrength
+
+            supportText,
+
+            supportDistanceText,
+
+            resistanceText,
+
+            resistanceDistanceText,
+
+            liquidity.text,
+
+            signal,
+
+            signalStrength,
+
+            strengthLabel
         )
     }
 
+    /*
+     * ============================================================
+     * EMA
+     * ============================================================
+     */
     private fun calculateEMA(
         prices: List<Double>,
         period: Int
@@ -1030,6 +1423,11 @@ class MainActivity : Activity() {
         return ema
     }
 
+    /*
+     * ============================================================
+     * RSI
+     * ============================================================
+     */
     private fun calculateRSI(
         prices: List<Double>,
         period: Int
@@ -1118,6 +1516,11 @@ class MainActivity : Activity() {
                     )
     }
 
+    /*
+     * ============================================================
+     * MOMENTUM
+     * ============================================================
+     */
     private fun calculateMomentum(
         prices: List<Double>,
         candles: Int
@@ -1137,6 +1540,57 @@ class MainActivity : Activity() {
                 ]
     }
 
+    /*
+     * ============================================================
+     * API ERROR
+     * ============================================================
+     */
+    private fun extractApiError(
+        body: String
+    ): String {
+
+        if (body.isBlank()) {
+            return "Empty response"
+        }
+
+        return try {
+
+            val json =
+                JSONObject(body)
+
+            val message =
+                json.optString("message")
+
+            val code =
+                json.optString("code")
+
+            when {
+
+                message.isNotBlank() &&
+                        code.isNotBlank() ->
+                    "$code - $message"
+
+                message.isNotBlank() ->
+                    message
+
+                code.isNotBlank() ->
+                    "Code $code"
+
+                else ->
+                    body.take(180)
+            }
+
+        } catch (e: Exception) {
+
+            body.take(180)
+        }
+    }
+
+    /*
+     * ============================================================
+     * ERROR DISPLAY
+     * ============================================================
+     */
     private fun showError(
         symbol: String,
         message: String
@@ -1175,6 +1629,11 @@ class MainActivity : Activity() {
         }
     }
 
+    /*
+     * ============================================================
+     * NOTIFICATION CHANNEL
+     * ============================================================
+     */
     private fun createNotificationChannel() {
 
         if (
@@ -1203,6 +1662,11 @@ class MainActivity : Activity() {
         }
     }
 
+    /*
+     * ============================================================
+     * NOTIFICATION
+     * ============================================================
+     */
     private fun sendNotification(
         title: String,
         message: String
