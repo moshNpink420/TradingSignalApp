@@ -40,7 +40,7 @@ class MainActivity : Activity() {
 
     // IMPORTANT:
     // এখানে আপনার আগের API key রাখুন।
-    private val API_KEY = "YOUR_EXISTING_API_KEY"
+    private val API_KEY = "404594e1a458416998da981e69787f31"
 
     private val CHANNEL_ID = "trading_signal_channel"
 
