@@ -38,18 +38,23 @@ class MainActivity : Activity() {
         .readTimeout(15, TimeUnit.SECONDS)
         .build()
 
-    // IMPORTANT:
-    // এখানে আপনার আগের API key রাখুন।
-    private val API_KEY = "404594e1a458416998da981e69787f31"
+    // ============================================================
+    // TWELVE DATA API KEY
+    // ============================================================
 
-    private val CHANNEL_ID = "trading_signal_channel"
+    private val API_KEY =
+        "404594e1a458416998da981e69787f31"
+
+    private val CHANNEL_ID =
+        "trading_signal_channel"
 
     private var lastBtcSignal = "WAIT"
     private var lastGoldSignal = "WAIT"
 
-    /*
-     * প্রতি 5 মিনিটে market data update
-     */
+    // ============================================================
+    // UPDATE EVERY 5 MINUTES
+    // ============================================================
+
     private val updateRunnable = object : Runnable {
 
         override fun run() {
@@ -64,21 +69,41 @@ class MainActivity : Activity() {
         }
     }
 
-    override fun onCreate(savedInstanceState: Bundle?) {
+    // ============================================================
+    // ON CREATE
+    // ============================================================
+
+    override fun onCreate(
+        savedInstanceState: Bundle?
+    ) {
+
         super.onCreate(savedInstanceState)
 
-        setContentView(R.layout.activity_main)
+        setContentView(
+            R.layout.activity_main
+        )
 
-        btcPrice = findViewById(R.id.btcPrice)
-        btcSignal = findViewById(R.id.btcSignal)
-        btcDetails = findViewById(R.id.btcDetails)
+        btcPrice =
+            findViewById(R.id.btcPrice)
 
-        goldPrice = findViewById(R.id.goldPrice)
-        goldSignal = findViewById(R.id.goldSignal)
-        goldDetails = findViewById(R.id.goldDetails)
+        btcSignal =
+            findViewById(R.id.btcSignal)
+
+        btcDetails =
+            findViewById(R.id.btcDetails)
+
+        goldPrice =
+            findViewById(R.id.goldPrice)
+
+        goldSignal =
+            findViewById(R.id.goldSignal)
+
+        goldDetails =
+            findViewById(R.id.goldDetails)
 
         createNotificationChannel()
 
+        // Android 13+ notification permission
         if (
             Build.VERSION.SDK_INT >=
             Build.VERSION_CODES.TIRAMISU
@@ -103,22 +128,32 @@ class MainActivity : Activity() {
         handler.post(updateRunnable)
     }
 
+    // ============================================================
+    // ON DESTROY
+    // ============================================================
+
     override fun onDestroy() {
 
-        handler.removeCallbacks(updateRunnable)
+        handler.removeCallbacks(
+            updateRunnable
+        )
 
         super.onDestroy()
     }
+
+    // ============================================================
+    // MARKET UPDATE
+    // ============================================================
 
     private fun updateMarket(
         symbol: String
     ) {
 
-        if (
-            API_KEY.isBlank() ||
-            API_KEY == "404594e1a458416998da981e69787f31" ||
-            API_KEY == "404594e1a458416998da981e69787f31"
-        ) {
+        // IMPORTANT:
+        // এখানে আর API key-কে invalid হিসেবে ধরা হচ্ছে না।
+        // শুধু সত্যিই blank হলে error দেখাবে।
+
+        if (API_KEY.isBlank()) {
 
             showError(
                 symbol,
@@ -151,16 +186,25 @@ class MainActivity : Activity() {
                         .get()
                         .build()
 
-                client.newCall(request).execute().use { response ->
+                client.newCall(
+                    request
+                ).execute().use { response ->
 
                     val body =
-                        response.body?.string()
+                        response.body
+                            ?.string()
                             .orEmpty()
+
+                    // ====================================================
+                    // HTTP ERROR
+                    // ====================================================
 
                     if (!response.isSuccessful) {
 
                         val error =
-                            extractApiError(body)
+                            extractApiError(
+                                body
+                            )
 
                         showError(
                             symbol,
@@ -169,6 +213,10 @@ class MainActivity : Activity() {
 
                         return@use
                     }
+
+                    // ====================================================
+                    // EMPTY RESPONSE
+                    // ====================================================
 
                     if (body.isBlank()) {
 
@@ -183,6 +231,10 @@ class MainActivity : Activity() {
                     val json =
                         JSONObject(body)
 
+                    // ====================================================
+                    // API ERROR
+                    // ====================================================
+
                     if (
                         json.optString("status")
                             .equals(
@@ -193,7 +245,9 @@ class MainActivity : Activity() {
                     ) {
 
                         val error =
-                            extractApiError(body)
+                            extractApiError(
+                                body
+                            )
 
                         showError(
                             symbol,
@@ -203,8 +257,14 @@ class MainActivity : Activity() {
                         return@use
                     }
 
+                    // ====================================================
+                    // CANDLE DATA
+                    // ====================================================
+
                     val values =
-                        json.optJSONArray("values")
+                        json.optJSONArray(
+                            "values"
+                        )
 
                     if (
                         values == null ||
@@ -234,11 +294,9 @@ class MainActivity : Activity() {
                     val times =
                         ArrayList<String>()
 
-                    /*
-                     * Twelve Data newest candle আগে দেয়।
-                     *
-                     * তাই oldest -> newest
-                     */
+                    // Twelve Data newest -> oldest
+                    // Convert to oldest -> newest
+
                     for (
                         i in values.length() - 1 downTo 0
                     ) {
@@ -247,26 +305,30 @@ class MainActivity : Activity() {
                             values.getJSONObject(i)
 
                         opens.add(
-                            candle.optString("open")
-                                .toDoubleOrNull()
+                            candle.optString(
+                                "open"
+                            ).toDoubleOrNull()
                                 ?: 0.0
                         )
 
                         highs.add(
-                            candle.optString("high")
-                                .toDoubleOrNull()
+                            candle.optString(
+                                "high"
+                            ).toDoubleOrNull()
                                 ?: 0.0
                         )
 
                         lows.add(
-                            candle.optString("low")
-                                .toDoubleOrNull()
+                            candle.optString(
+                                "low"
+                            ).toDoubleOrNull()
                                 ?: 0.0
                         )
 
                         closes.add(
-                            candle.optString("close")
-                                .toDoubleOrNull()
+                            candle.optString(
+                                "close"
+                            ).toDoubleOrNull()
                                 ?: 0.0
                         )
 
@@ -278,11 +340,19 @@ class MainActivity : Activity() {
                         )
                     }
 
+                    // ====================================================
+                    // CURRENT PRICE
+                    // ====================================================
+
                     val price =
                         closes.last()
 
                     val latestCandleTime =
                         times.last()
+
+                    // ====================================================
+                    // INDICATORS
+                    // ====================================================
 
                     val ema9 =
                         calculateEMA(
@@ -308,9 +378,10 @@ class MainActivity : Activity() {
                             5
                         )
 
-                    /*
-                     * SUPPORT / RESISTANCE
-                     */
+                    // ====================================================
+                    // SUPPORT / RESISTANCE
+                    // ====================================================
+
                     val support =
                         calculateSupport(
                             lows
@@ -321,9 +392,10 @@ class MainActivity : Activity() {
                             highs
                         )
 
-                    /*
-                     * LIQUIDITY
-                     */
+                    // ====================================================
+                    // LIQUIDITY
+                    // ====================================================
+
                     val liquidity =
                         detectLiquidity(
                             opens,
@@ -332,10 +404,10 @@ class MainActivity : Activity() {
                             closes
                         )
 
-                    /*
-                     * Existing signal engine
-                     * + liquidity filter
-                     */
+                    // ====================================================
+                    // SIGNAL
+                    // ====================================================
+
                     val signal =
                         calculateStrongSignal(
                             closes,
@@ -348,6 +420,10 @@ class MainActivity : Activity() {
                             momentum,
                             liquidity
                         )
+
+                    // ====================================================
+                    // DETAILS
+                    // ====================================================
 
                     val details =
                         calculateSignalDetails(
@@ -366,6 +442,10 @@ class MainActivity : Activity() {
                             signal
                         )
 
+                    // ====================================================
+                    // UI
+                    // ====================================================
+
                     runOnUiThread {
 
                         val formattedPrice =
@@ -376,7 +456,8 @@ class MainActivity : Activity() {
                             )
 
                         if (
-                            symbol == "BTC/USD"
+                            symbol ==
+                            "BTC/USD"
                         ) {
 
                             btcPrice.text =
@@ -387,6 +468,9 @@ class MainActivity : Activity() {
 
                             btcDetails.text =
                                 details
+
+                            // Notification only when
+                            // signal changes
 
                             if (
                                 (
@@ -438,7 +522,9 @@ class MainActivity : Activity() {
                     }
                 }
 
-            } catch (e: Exception) {
+            } catch (
+                e: Exception
+            ) {
 
                 showError(
                     symbol,
@@ -453,14 +539,10 @@ class MainActivity : Activity() {
         }.start()
     }
 
-    /*
-     * ============================================================
-     * SUPPORT
-     * ============================================================
-     *
-     * সর্বশেষ 20টি completed/available candle-এর
-     * মধ্যে সবচেয়ে নিচের low support হিসেবে নেওয়া হচ্ছে।
-     */
+    // ============================================================
+    // SUPPORT
+    // ============================================================
+
     private fun calculateSupport(
         lows: List<Double>
     ): Double {
@@ -487,13 +569,18 @@ class MainActivity : Activity() {
             i in start until lows.size - 1
         ) {
 
-            if (lows[i] < support) {
-                support = lows[i]
+            if (
+                lows[i] < support
+            ) {
+
+                support =
+                    lows[i]
             }
         }
 
         return if (
-            support == Double.MAX_VALUE
+            support ==
+            Double.MAX_VALUE
         ) {
             0.0
         } else {
@@ -501,14 +588,10 @@ class MainActivity : Activity() {
         }
     }
 
-    /*
-     * ============================================================
-     * RESISTANCE
-     * ============================================================
-     *
-     * সর্বশেষ 20টি candle-এর মধ্যে
-     * সবচেয়ে উপরের high resistance হিসেবে নেওয়া হচ্ছে।
-     */
+    // ============================================================
+    // RESISTANCE
+    // ============================================================
+
     private fun calculateResistance(
         highs: List<Double>
     ): Double {
@@ -535,13 +618,18 @@ class MainActivity : Activity() {
             i in start until highs.size - 1
         ) {
 
-            if (highs[i] > resistance) {
-                resistance = highs[i]
+            if (
+                highs[i] > resistance
+            ) {
+
+                resistance =
+                    highs[i]
             }
         }
 
         return if (
-            resistance == Double.MIN_VALUE
+            resistance ==
+            Double.MIN_VALUE
         ) {
             0.0
         } else {
@@ -549,42 +637,20 @@ class MainActivity : Activity() {
         }
     }
 
-    /*
-     * ============================================================
-     * LIQUIDITY DATA CLASS
-     * ============================================================
-     */
+    // ============================================================
+    // LIQUIDITY RESULT
+    // ============================================================
+
     private data class LiquidityResult(
         val sellSideSweep: Boolean,
         val buySideSweep: Boolean,
         val text: String
     )
 
-    /*
-     * ============================================================
-     * LIQUIDITY DETECTION
-     * ============================================================
-     *
-     * Sell-side liquidity:
-     *
-     * Current candle low
-     *      ↓
-     * previous low-এর নিচে
-     *      ↓
-     * কিন্তু candle close আবার previous low-এর ওপরে
-     *
-     * = Sell-side liquidity sweep
-     *
-     * Buy-side liquidity:
-     *
-     * Current candle high
-     *      ↑
-     * previous high-এর ওপরে
-     *      ↑
-     * কিন্তু candle close আবার previous high-এর নিচে
-     *
-     * = Buy-side liquidity sweep
-     */
+    // ============================================================
+    // LIQUIDITY DETECTION
+    // ============================================================
+
     private fun detectLiquidity(
         opens: List<Double>,
         highs: List<Double>,
@@ -627,12 +693,20 @@ class MainActivity : Activity() {
             i in start until previousEnd
         ) {
 
-            if (lows[i] < previousLow) {
-                previousLow = lows[i]
+            if (
+                lows[i] < previousLow
+            ) {
+
+                previousLow =
+                    lows[i]
             }
 
-            if (highs[i] > previousHigh) {
-                previousHigh = highs[i]
+            if (
+                highs[i] > previousHigh
+            ) {
+
+                previousHigh =
+                    highs[i]
             }
         }
 
@@ -645,13 +719,17 @@ class MainActivity : Activity() {
         val currentClose =
             closes[lastIndex]
 
+        // Sell-side liquidity sweep
         val sellSideSweep =
-            previousLow != Double.MAX_VALUE &&
+            previousLow !=
+                    Double.MAX_VALUE &&
                     currentLow < previousLow &&
                     currentClose > previousLow
 
+        // Buy-side liquidity sweep
         val buySideSweep =
-            previousHigh != Double.MIN_VALUE &&
+            previousHigh !=
+                    Double.MIN_VALUE &&
                     currentHigh > previousHigh &&
                     currentClose < previousHigh
 
@@ -679,28 +757,10 @@ class MainActivity : Activity() {
         )
     }
 
-    /*
-     * ============================================================
-     * STRONG SIGNAL ENGINE
-     * ============================================================
-     *
-     * আগের scoring system রাখা হয়েছে।
-     *
-     * Maximum:
-     *
-     * EMA trend       = 1
-     * EMA strength    = 1
-     * Price position  = 1
-     * RSI             = 1
-     * Momentum        = 1
-     * Pullback        = 2
-     * Candle          = 1
-     *
-     * TOTAL = 8
-     *
-     * Liquidity এখানে আলাদা confirmation/filter।
-     * এতে Signal Strength 8-এর বেশি হবে না।
-     */
+    // ============================================================
+    // STRONG SIGNAL ENGINE
+    // ============================================================
+
     private fun calculateStrongSignal(
         closes: List<Double>,
         opens: List<Double>,
@@ -734,17 +794,25 @@ class MainActivity : Activity() {
         var buyScore = 0
         var sellScore = 0
 
+        // ====================================================
         // 1. EMA TREND
+        // ====================================================
 
-        if (ema9 > ema21) {
+        if (
+            ema9 > ema21
+        ) {
             buyScore++
         }
 
-        if (ema9 < ema21) {
+        if (
+            ema9 < ema21
+        ) {
             sellScore++
         }
 
-        // 2. EMA TREND STRENGTH
+        // ====================================================
+        // 2. EMA STRENGTH
+        // ====================================================
 
         if (
             ema9 > ema21 &&
@@ -760,22 +828,31 @@ class MainActivity : Activity() {
             sellScore++
         }
 
+        // ====================================================
         // 3. PRICE POSITION
+        // ====================================================
 
-        if (price > ema9) {
+        if (
+            price > ema9
+        ) {
             buyScore++
         }
 
-        if (price < ema9) {
+        if (
+            price < ema9
+        ) {
             sellScore++
         }
 
+        // ====================================================
         // 4. RSI
+        // ====================================================
 
         if (
             rsi >= 52.0 &&
             rsi <= 68.0
         ) {
+
             buyScore++
         }
 
@@ -783,28 +860,45 @@ class MainActivity : Activity() {
             rsi <= 48.0 &&
             rsi >= 32.0
         ) {
+
             sellScore++
         }
 
-        if (rsi > 72.0) {
+        if (
+            rsi > 72.0
+        ) {
+
             buyScore--
         }
 
-        if (rsi < 28.0) {
+        if (
+            rsi < 28.0
+        ) {
+
             sellScore--
         }
 
+        // ====================================================
         // 5. MOMENTUM
+        // ====================================================
 
-        if (momentum > 0) {
+        if (
+            momentum > 0
+        ) {
+
             buyScore++
         }
 
-        if (momentum < 0) {
+        if (
+            momentum < 0
+        ) {
+
             sellScore++
         }
 
+        // ====================================================
         // 6. PULLBACK
+        // ====================================================
 
         val previousDistance =
             previousClose -
@@ -819,6 +913,7 @@ class MainActivity : Activity() {
             previousDistance <= 0 &&
             currentDistance > 0
         ) {
+
             buyScore += 2
         }
 
@@ -827,10 +922,13 @@ class MainActivity : Activity() {
             previousDistance >= 0 &&
             currentDistance < 0
         ) {
+
             sellScore += 2
         }
 
+        // ====================================================
         // 7. CANDLE
+        // ====================================================
 
         val lastOpen =
             opens.last()
@@ -861,7 +959,7 @@ class MainActivity : Activity() {
             minOf(
                 lastOpen,
                 lastClose
-            ) -
+                    ) -
                     lastLow
 
         if (
@@ -870,6 +968,7 @@ class MainActivity : Activity() {
             lowerWick <=
             candleBody * 1.5
         ) {
+
             buyScore++
         }
 
@@ -879,20 +978,18 @@ class MainActivity : Activity() {
             upperWick <=
             candleBody * 1.5
         ) {
+
             sellScore++
         }
 
+        // ====================================================
+        // LIQUIDITY FILTER
+        // ====================================================
+
         /*
-         * LIQUIDITY FILTER
-         *
-         * Sell-side sweep + bullish conditions
-         * = BUY-এর জন্য supportive
-         *
-         * Buy-side sweep + bearish conditions
-         * = SELL-এর জন্য supportive
-         *
-         * কিন্তু যদি liquidity sweep signal-এর
-         * বিপরীত direction দেখায়, WAIT করা হবে।
+         * Buy-side liquidity swept
+         * while BUY is forming
+         * -> avoid BUY
          */
 
         if (
@@ -901,8 +998,15 @@ class MainActivity : Activity() {
             liquidity.buySideSweep &&
             !liquidity.sellSideSweep
         ) {
+
             return "WAIT"
         }
+
+        /*
+         * Sell-side liquidity swept
+         * while SELL is forming
+         * -> avoid SELL
+         */
 
         if (
             sellScore >= 4 &&
@@ -910,8 +1014,13 @@ class MainActivity : Activity() {
             liquidity.sellSideSweep &&
             !liquidity.buySideSweep
         ) {
+
             return "WAIT"
         }
+
+        // ====================================================
+        // FINAL SIGNAL
+        // ====================================================
 
         return when {
 
@@ -928,11 +1037,10 @@ class MainActivity : Activity() {
         }
     }
 
-    /*
-     * ============================================================
-     * SIGNAL DETAILS
-     * ============================================================
-     */
+    // ============================================================
+    // SIGNAL DETAILS
+    // ============================================================
+
     private fun calculateSignalDetails(
         closes: List<Double>,
         opens: List<Double>,
@@ -972,26 +1080,39 @@ class MainActivity : Activity() {
         var buyScore = 0
         var sellScore = 0
 
+        // ====================================================
         // EMA TREND
+        // ====================================================
 
         val emaTrend: String
 
-        if (ema9 > ema21) {
+        if (
+            ema9 > ema21
+        ) {
 
-            emaTrend = "Bullish"
+            emaTrend =
+                "Bullish"
+
             buyScore++
 
-        } else if (ema9 < ema21) {
+        } else if (
+            ema9 < ema21
+        ) {
 
-            emaTrend = "Bearish"
+            emaTrend =
+                "Bearish"
+
             sellScore++
 
         } else {
 
-            emaTrend = "Neutral"
+            emaTrend =
+                "Neutral"
         }
 
+        // ====================================================
         // EMA STRENGTH
+        // ====================================================
 
         val emaStrength: String
 
@@ -1000,7 +1121,9 @@ class MainActivity : Activity() {
             ema9 > previousEma9
         ) {
 
-            emaStrength = "Bullish ↑"
+            emaStrength =
+                "Bullish ↑"
+
             buyScore++
 
         } else if (
@@ -1008,19 +1131,26 @@ class MainActivity : Activity() {
             ema9 < previousEma9
         ) {
 
-            emaStrength = "Bearish ↓"
+            emaStrength =
+                "Bearish ↓"
+
             sellScore++
 
         } else {
 
-            emaStrength = "Weak/Flat"
+            emaStrength =
+                "Weak/Flat"
         }
 
+        // ====================================================
         // PRICE POSITION
+        // ====================================================
 
         val pricePosition: String
 
-        if (price > ema9) {
+        if (
+            price > ema9
+        ) {
 
             pricePosition =
                 "Above EMA9"
@@ -1035,7 +1165,9 @@ class MainActivity : Activity() {
             sellScore++
         }
 
+        // ====================================================
         // RSI
+        // ====================================================
 
         val rsiText =
             String.format(
@@ -1066,14 +1198,18 @@ class MainActivity : Activity() {
 
             sellScore++
 
-        } else if (rsi > 72.0) {
+        } else if (
+            rsi > 72.0
+        ) {
 
             rsiStatus =
                 "Overbought"
 
             buyScore--
 
-        } else if (rsi < 28.0) {
+        } else if (
+            rsi < 28.0
+        ) {
 
             rsiStatus =
                 "Oversold"
@@ -1086,18 +1222,24 @@ class MainActivity : Activity() {
                 "Neutral"
         }
 
+        // ====================================================
         // MOMENTUM
+        // ====================================================
 
         val momentumStatus: String
 
-        if (momentum > 0) {
+        if (
+            momentum > 0
+        ) {
 
             momentumStatus =
                 "Positive"
 
             buyScore++
 
-        } else if (momentum < 0) {
+        } else if (
+            momentum < 0
+        ) {
 
             momentumStatus =
                 "Negative"
@@ -1110,7 +1252,9 @@ class MainActivity : Activity() {
                 "Flat"
         }
 
+        // ====================================================
         // PULLBACK
+        // ====================================================
 
         val previousDistance =
             previousClose -
@@ -1150,7 +1294,9 @@ class MainActivity : Activity() {
                 "No fresh pullback"
         }
 
+        // ====================================================
         // CANDLE
+        // ====================================================
 
         val lastOpen =
             opens.last()
@@ -1216,11 +1362,10 @@ class MainActivity : Activity() {
                 "Weak/Neutral"
         }
 
-        /*
-         * SIGNAL STRENGTH
-         *
-         * Existing maximum = 8
-         */
+        // ====================================================
+        // SIGNAL STRENGTH
+        // ====================================================
+
         val signalStrength =
             maxOf(
                 buyScore,
@@ -1230,11 +1375,14 @@ class MainActivity : Activity() {
                 8
             )
 
-        /*
-         * SUPPORT / RESISTANCE TEXT
-         */
+        // ====================================================
+        // SUPPORT
+        // ====================================================
+
         val supportText =
-            if (support > 0) {
+            if (
+                support > 0
+            ) {
 
                 String.format(
                     Locale.US,
@@ -1243,11 +1391,18 @@ class MainActivity : Activity() {
                 )
 
             } else {
+
                 "--"
             }
 
+        // ====================================================
+        // RESISTANCE
+        // ====================================================
+
         val resistanceText =
-            if (resistance > 0) {
+            if (
+                resistance > 0
+            ) {
 
                 String.format(
                     Locale.US,
@@ -1256,14 +1411,18 @@ class MainActivity : Activity() {
                 )
 
             } else {
+
                 "--"
             }
 
-        /*
-         * Distance from S/R
-         */
+        // ====================================================
+        // SUPPORT DISTANCE
+        // ====================================================
+
         val supportDistanceText =
-            if (support > 0) {
+            if (
+                support > 0
+            ) {
 
                 val distance =
                     (
@@ -1278,11 +1437,18 @@ class MainActivity : Activity() {
                 )
 
             } else {
+
                 "--"
             }
 
+        // ====================================================
+        // RESISTANCE DISTANCE
+        // ====================================================
+
         val resistanceDistanceText =
-            if (resistance > 0) {
+            if (
+                resistance > 0
+            ) {
 
                 val distance =
                     (
@@ -1297,12 +1463,14 @@ class MainActivity : Activity() {
                 )
 
             } else {
+
                 "--"
             }
 
-        /*
-         * Signal strength label
-         */
+        // ====================================================
+        // STRENGTH LABEL
+        // ====================================================
+
         val strengthLabel =
             when {
 
@@ -1324,6 +1492,10 @@ class MainActivity : Activity() {
                 else ->
                     "WAIT"
             }
+
+        // ====================================================
+        // FINAL DETAILS
+        // ====================================================
 
         return String.format(
             Locale.US,
@@ -1382,21 +1554,25 @@ class MainActivity : Activity() {
         )
     }
 
-    /*
-     * ============================================================
-     * EMA
-     * ============================================================
-     */
+    // ============================================================
+    // EMA
+    // ============================================================
+
     private fun calculateEMA(
         prices: List<Double>,
         period: Int
     ): Double {
 
-        if (prices.isEmpty()) {
+        if (
+            prices.isEmpty()
+        ) {
             return 0.0
         }
 
-        if (prices.size < period) {
+        if (
+            prices.size < period
+        ) {
+
             return prices.last()
         }
 
@@ -1423,11 +1599,10 @@ class MainActivity : Activity() {
         return ema
     }
 
-    /*
-     * ============================================================
-     * RSI
-     * ============================================================
-     */
+    // ============================================================
+    // RSI
+    // ============================================================
+
     private fun calculateRSI(
         prices: List<Double>,
         period: Int
@@ -1436,25 +1611,32 @@ class MainActivity : Activity() {
         if (
             prices.size <= period
         ) {
+
             return 50.0
         }
 
         var gain = 0.0
         var loss = 0.0
 
-        for (i in 1..period) {
+        for (
+            i in 1..period
+        ) {
 
             val change =
                 prices[i] -
                         prices[i - 1]
 
-            if (change >= 0) {
+            if (
+                change >= 0
+            ) {
 
                 gain += change
 
             } else {
 
-                loss += abs(change)
+                loss += abs(
+                    change
+                )
             }
         }
 
@@ -1473,16 +1655,22 @@ class MainActivity : Activity() {
                         prices[i - 1]
 
             val currentGain =
-                if (change > 0)
+                if (
+                    change > 0
+                ) {
                     change
-                else
+                } else {
                     0.0
+                }
 
             val currentLoss =
-                if (change < 0)
+                if (
+                    change < 0
+                ) {
                     abs(change)
-                else
+                } else {
                     0.0
+                }
 
             averageGain =
                 (
@@ -1502,6 +1690,7 @@ class MainActivity : Activity() {
         if (
             averageLoss == 0.0
         ) {
+
             return 100.0
         }
 
@@ -1516,11 +1705,10 @@ class MainActivity : Activity() {
                     )
     }
 
-    /*
-     * ============================================================
-     * MOMENTUM
-     * ============================================================
-     */
+    // ============================================================
+    // MOMENTUM
+    // ============================================================
+
     private fun calculateMomentum(
         prices: List<Double>,
         candles: Int
@@ -1529,6 +1717,7 @@ class MainActivity : Activity() {
         if (
             prices.size <= candles
         ) {
+
             return 0.0
         }
 
@@ -1540,16 +1729,18 @@ class MainActivity : Activity() {
                 ]
     }
 
-    /*
-     * ============================================================
-     * API ERROR
-     * ============================================================
-     */
+    // ============================================================
+    // API ERROR
+    // ============================================================
+
     private fun extractApiError(
         body: String
     ): String {
 
-        if (body.isBlank()) {
+        if (
+            body.isBlank()
+        ) {
+
             return "Empty response"
         }
 
@@ -1559,10 +1750,14 @@ class MainActivity : Activity() {
                 JSONObject(body)
 
             val message =
-                json.optString("message")
+                json.optString(
+                    "message"
+                )
 
             val code =
-                json.optString("code")
+                json.optString(
+                    "code"
+                )
 
             when {
 
@@ -1580,17 +1775,18 @@ class MainActivity : Activity() {
                     body.take(180)
             }
 
-        } catch (e: Exception) {
+        } catch (
+            e: Exception
+        ) {
 
             body.take(180)
         }
     }
 
-    /*
-     * ============================================================
-     * ERROR DISPLAY
-     * ============================================================
-     */
+    // ============================================================
+    // ERROR DISPLAY
+    // ============================================================
+
     private fun showError(
         symbol: String,
         message: String
@@ -1599,7 +1795,8 @@ class MainActivity : Activity() {
         runOnUiThread {
 
             if (
-                symbol == "BTC/USD"
+                symbol ==
+                "BTC/USD"
             ) {
 
                 btcPrice.text =
@@ -1629,11 +1826,10 @@ class MainActivity : Activity() {
         }
     }
 
-    /*
-     * ============================================================
-     * NOTIFICATION CHANNEL
-     * ============================================================
-     */
+    // ============================================================
+    // NOTIFICATION CHANNEL
+    // ============================================================
+
     private fun createNotificationChannel() {
 
         if (
@@ -1662,11 +1858,10 @@ class MainActivity : Activity() {
         }
     }
 
-    /*
-     * ============================================================
-     * NOTIFICATION
-     * ============================================================
-     */
+    // ============================================================
+    // NOTIFICATION
+    // ============================================================
+
     private fun sendNotification(
         title: String,
         message: String
@@ -1682,6 +1877,7 @@ class MainActivity : Activity() {
                     Manifest.permission.POST_NOTIFICATIONS
                 ) != PackageManager.PERMISSION_GRANTED
             ) {
+
                 return
             }
         }
@@ -1694,8 +1890,12 @@ class MainActivity : Activity() {
                 .setSmallIcon(
                     android.R.drawable.ic_dialog_info
                 )
-                .setContentTitle(title)
-                .setContentText(message)
+                .setContentTitle(
+                    title
+                )
+                .setContentText(
+                    message
+                )
                 .setStyle(
                     NotificationCompat.BigTextStyle()
                         .bigText(message)
@@ -1703,7 +1903,9 @@ class MainActivity : Activity() {
                 .setPriority(
                     NotificationCompat.PRIORITY_HIGH
                 )
-                .setAutoCancel(true)
+                .setAutoCancel(
+                    true
+                )
                 .build()
 
         NotificationManagerCompat
