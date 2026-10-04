@@ -1,3 +1,4 @@
+
 package com.moshnpink420.tradingsignalapp
 
 import android.Manifest
@@ -10,7 +11,9 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.view.ViewGroup
 import android.widget.LinearLayout
+import android.widget.ScrollView
 import android.widget.TextView
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
@@ -18,31 +21,37 @@ import okhttp3.*
 import org.json.JSONObject
 import java.io.IOException
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
 
 class MainActivity : Activity() {
 
     private lateinit var container: LinearLayout
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
         .build()
 
     private val handler = Handler(Looper.getMainLooper())
 
     private val API_KEY = BuildConfig.TWELVE_DATA_API_KEY
 
-    private var lastBtcSignal = ""
     private var lastGoldSignal = ""
+
+    private val SYMBOL = "XAU/USD"
+
+    private val UPDATE_INTERVAL = 5 * 60 * 1000L
+
+    private val STRONG_ZONE_MIN_SCORE = 75
 
     private val updateRunnable = object : Runnable {
         override fun run() {
-            loadSymbol("BTC/USD")
-            loadSymbol("XAU/USD")
-
-            handler.postDelayed(this, 5 * 60 * 1000L)
+            loadGold()
+            handler.postDelayed(this, UPDATE_INTERVAL)
         }
     }
 
@@ -56,7 +65,7 @@ class MainActivity : Activity() {
         container.orientation = LinearLayout.VERTICAL
         container.setPadding(25, 20, 25, 30)
 
-        val scrollView = android.widget.ScrollView(this)
+        val scrollView = ScrollView(this)
         scrollView.addView(container)
 
         setContentView(scrollView)
@@ -69,28 +78,38 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         handler.removeCallbacks(updateRunnable)
+        client.dispatcher.cancelAll()
     }
 
     private fun addTitle() {
         val title = TextView(this)
 
-        title.text = "TRADING SIGNAL APP"
+        title.text = "TRADING SIGNAL APP\nGOLD EDITION"
         title.textSize = 24f
         title.setPadding(0, 10, 0, 25)
 
         container.addView(title)
     }
 
-    private fun loadSymbol(symbol: String) {
+    private fun refreshScreen() {
+        container.removeAllViews()
+        addTitle()
+    }
+
+    // ==========================================
+    // GOLD MARKET DATA
+    // ==========================================
+
+    private fun loadGold() {
 
         if (API_KEY.isBlank()) {
-            showError(symbol, "API key missing")
+            showError("API key missing")
             return
         }
 
         val url =
             "https://api.twelvedata.com/time_series" +
-                    "?symbol=${symbol.replace("/", "%2F")}" +
+                    "?symbol=XAU%2FUSD" +
                     "&interval=5min" +
                     "&outputsize=50" +
                     "&apikey=$API_KEY"
@@ -105,37 +124,54 @@ class MainActivity : Activity() {
             override fun onFailure(call: Call, e: IOException) {
                 runOnUiThread {
                     showError(
-                        symbol,
                         "Network error: ${e.message ?: "Unknown error"}"
                     )
                 }
             }
 
-            override fun onResponse(call: Call, response: Response) {
+            override fun onResponse(
+                call: Call,
+                response: Response
+            ) {
 
                 val body = response.body?.string() ?: ""
 
                 if (!response.isSuccessful) {
                     runOnUiThread {
-                        showError(
-                            symbol,
-                            "Data error Http ${response.code}"
-                        )
+                        showError("Data error Http ${response.code}")
                     }
                     return
                 }
 
                 try {
+
                     val json = JSONObject(body)
 
-                    if (json.has("code") && json.optInt("code") != 200) {
-                        val message =
-                            json.optString("message", "Market data error")
-
+                    if (
+                        json.has("status") &&
+                        json.optString("status") == "error"
+                    ) {
                         runOnUiThread {
                             showError(
-                                symbol,
-                                "Data error: $message"
+                                json.optString(
+                                    "message",
+                                    "Market data error"
+                                )
+                            )
+                        }
+                        return
+                    }
+
+                    if (
+                        json.has("code") &&
+                        json.optInt("code", 200) != 200
+                    ) {
+                        runOnUiThread {
+                            showError(
+                                json.optString(
+                                    "message",
+                                    "Market data error"
+                                )
                             )
                         }
                         return
@@ -143,10 +179,7 @@ class MainActivity : Activity() {
 
                     if (!json.has("values")) {
                         runOnUiThread {
-                            showError(
-                                symbol,
-                                "Market data error"
-                            )
+                            showError("Market data error")
                         }
                         return
                     }
@@ -155,38 +188,37 @@ class MainActivity : Activity() {
 
                     if (values.length() < 25) {
                         runOnUiThread {
-                            showError(
-                                symbol,
-                                "Not enough candle data"
-                            )
+                            showError("Not enough candle data")
                         }
                         return
                     }
 
                     val candles = ArrayList<Candle>()
 
-                    /*
-                     * Twelve Data returns newest candle first.
-                     * We reverse the order so calculations use
-                     * oldest -> newest.
-                     */
+                    // Twelve Data newest first.
+                    // Reverse to oldest -> newest.
+
                     for (i in values.length() - 1 downTo 0) {
 
                         val item = values.getJSONObject(i)
 
                         val time = item.optString("datetime")
 
-                        val open = item.optDouble("open")
-                        val high = item.optDouble("high")
-                        val low = item.optDouble("low")
-                        val close = item.optDouble("close")
+                        val open = item.optDouble("open", Double.NaN)
+                        val high = item.optDouble("high", Double.NaN)
+                        val low = item.optDouble("low", Double.NaN)
+                        val close = item.optDouble("close", Double.NaN)
 
                         if (
                             open.isFinite() &&
                             high.isFinite() &&
                             low.isFinite() &&
-                            close.isFinite()
+                            close.isFinite() &&
+                            high >= low &&
+                            open > 0 &&
+                            close > 0
                         ) {
+
                             candles.add(
                                 Candle(
                                     time,
@@ -201,10 +233,7 @@ class MainActivity : Activity() {
 
                     if (candles.size < 25) {
                         runOnUiThread {
-                            showError(
-                                symbol,
-                                "Not enough valid candles"
-                            )
+                            showError("Not enough valid candles")
                         }
                         return
                     }
@@ -212,14 +241,13 @@ class MainActivity : Activity() {
                     val analysis = analyze(candles)
 
                     runOnUiThread {
-                        updateUI(symbol, analysis)
+                        updateUI(analysis)
                     }
 
                 } catch (e: Exception) {
 
                     runOnUiThread {
                         showError(
-                            symbol,
                             "Parse error: ${e.message ?: "Unknown error"}"
                         )
                     }
@@ -228,16 +256,18 @@ class MainActivity : Activity() {
         })
     }
 
+    // ==========================================
+    // MAIN ANALYSIS
+    // ==========================================
+
     private fun analyze(candles: List<Candle>): Analysis {
 
         val closes = candles.map { it.close }
 
         val current = candles.last()
-        val previous = candles[candles.size - 2]
 
         val ema9 = calculateEMA(closes, 9)
         val ema21 = calculateEMA(closes, 21)
-
         val rsi = calculateRSI(closes, 14)
 
         val momentum =
@@ -252,30 +282,23 @@ class MainActivity : Activity() {
         val priceAboveEMA9 = current.close > ema9
         val priceBelowEMA9 = current.close < ema9
 
-        /*
-         * Pullback:
-         * Check recent candles against EMA9.
-         */
-        val recentPullbackCandles =
-            candles.takeLast(5)
+        // Pullback
+
+        val recentPullbackCandles = candles.takeLast(5)
 
         val bullishPullback =
             recentPullbackCandles.any {
                 it.low <= ema9
-            } &&
-                    current.close > ema9
+            } && current.close > ema9
 
         val bearishPullback =
             recentPullbackCandles.any {
                 it.high >= ema9
-            } &&
-                    current.close < ema9
+            } && current.close < ema9
 
-        /*
-         * Candle confirmation
-         */
-        val candleRange =
-            current.high - current.low
+        // Candle analysis
+
+        val candleRange = current.high - current.low
 
         val candleBody =
             abs(current.close - current.open)
@@ -296,31 +319,28 @@ class MainActivity : Activity() {
                     candleRange > 0 &&
                     candleBody / candleRange >= 0.60
 
-        /*
-         * Support / Resistance
-         *
-         * Current candle is excluded.
-         */
+        // ATR
+
+        val atr = calculateATR(candles, 14)
+
+        // Support / Resistance
+
         val srCandles =
             candles.dropLast(1).takeLast(20)
 
-        val support =
-            srCandles.minOf { it.low }
+        val support = srCandles.minOf { it.low }
+        val resistance = srCandles.maxOf { it.high }
 
-        val resistance =
-            srCandles.maxOf { it.high }
+        // Liquidity sweep
 
-        /*
-         * Liquidity sweep
-         */
-        val liquidityCandles =
+        val previousCandles =
             candles.dropLast(1).takeLast(20)
 
         val previousLow =
-            liquidityCandles.minOf { it.low }
+            previousCandles.minOf { it.low }
 
         val previousHigh =
-            liquidityCandles.maxOf { it.high }
+            previousCandles.maxOf { it.high }
 
         val sellSideSweep =
             current.low < previousLow &&
@@ -330,23 +350,74 @@ class MainActivity : Activity() {
             current.high > previousHigh &&
                     current.close < previousHigh
 
-        /*
-         * BUY SCORE
-         */
+        // Combined Supply / Demand Detection
+
+        val zones = detectStrongZones(candles, atr)
+
+        // Select nearest valid strong zones
+
+        val demandZone = zones
+            .filter { it.type == "DEMAND" }
+            .minByOrNull {
+                zoneDistance(current.close, it)
+            }
+
+        val supplyZone = zones
+            .filter { it.type == "SUPPLY" }
+            .minByOrNull {
+                zoneDistance(current.close, it)
+            }
+
+        val demandTouched =
+            demandZone != null &&
+                    current.low <= demandZone.high &&
+                    current.high >= demandZone.low
+
+        val supplyTouched =
+            supplyZone != null &&
+                    current.high >= supplyZone.low &&
+                    current.low <= supplyZone.high
+
+        val demandNear =
+            demandZone != null &&
+                    zoneDistancePercent(
+                        current.close,
+                        demandZone
+                    ) <= 0.20
+
+        val supplyNear =
+            supplyZone != null &&
+                    zoneDistancePercent(
+                        current.close,
+                        supplyZone
+                    ) <= 0.20
+
+        val demandConfirmation =
+            demandZone != null &&
+                    demandTouched &&
+                    bullishCandle &&
+                    current.close > demandZone.low
+
+        val supplyConfirmation =
+            supplyZone != null &&
+                    supplyTouched &&
+                    bearishCandle &&
+                    current.close < supplyZone.high
+
+        // ======================================
+        // BUY SCORE
+        // ======================================
+
         var buyScore = 0
 
         if (bullishTrend) buyScore += 15
-
         if (ema9 > ema21) buyScore += 10
-
         if (priceAboveEMA9) buyScore += 10
 
         if (rsi in 52.0..68.0) buyScore += 12
-
         if (rsi < 28) buyScore -= 5
 
         if (bullishMomentum) buyScore += 10
-
         if (bullishPullback) buyScore += 12
 
         if (strongBullishCandle) buyScore += 10
@@ -354,9 +425,15 @@ class MainActivity : Activity() {
 
         if (sellSideSweep) buyScore += 8
 
-        /*
-         * Resistance proximity reduces BUY confidence.
-         */
+        // Demand zone confirmation
+
+        if (demandConfirmation) buyScore += 12
+        else if (demandNear && bullishCandle) buyScore += 6
+
+        // Strong supply resistance
+
+        if (supplyNear) buyScore -= 8
+
         val distanceToResistance =
             if (resistance != 0.0)
                 abs(resistance - current.close) /
@@ -367,23 +444,20 @@ class MainActivity : Activity() {
             buyScore -= 8
         }
 
-        /*
-         * SELL SCORE
-         */
+        // ======================================
+        // SELL SCORE
+        // ======================================
+
         var sellScore = 0
 
         if (bearishTrend) sellScore += 15
-
         if (ema9 < ema21) sellScore += 10
-
         if (priceBelowEMA9) sellScore += 10
 
         if (rsi in 32.0..48.0) sellScore += 12
-
         if (rsi > 72) sellScore -= 5
 
         if (bearishMomentum) sellScore += 10
-
         if (bearishPullback) sellScore += 12
 
         if (strongBearishCandle) sellScore += 10
@@ -391,9 +465,15 @@ class MainActivity : Activity() {
 
         if (buySideSweep) sellScore += 8
 
-        /*
-         * Support proximity reduces SELL confidence.
-         */
+        // Supply zone confirmation
+
+        if (supplyConfirmation) sellScore += 12
+        else if (supplyNear && bearishCandle) sellScore += 6
+
+        // Strong demand support
+
+        if (demandNear) sellScore -= 8
+
         val distanceToSupport =
             if (support != 0.0)
                 abs(current.close - support) /
@@ -404,20 +484,14 @@ class MainActivity : Activity() {
             sellScore -= 8
         }
 
-        /*
-         * Keep scores inside 0-100.
-         */
         buyScore = buyScore.coerceIn(0, 100)
         sellScore = sellScore.coerceIn(0, 100)
 
-        /*
-         * Signal filter
-         *
-         * We don't want BUY/SELL just because one score
-         * is slightly higher.
-         */
-        val difference =
-            abs(buyScore - sellScore)
+        // ======================================
+        // FINAL SIGNAL
+        // ======================================
+
+        val difference = abs(buyScore - sellScore)
 
         val signal = when {
 
@@ -439,33 +513,29 @@ class MainActivity : Activity() {
                 "WAIT"
         }
 
-        val signalScore =
-            maxOf(buyScore, sellScore)
+        val signalScore = maxOf(buyScore, sellScore)
 
-        val strength =
-            when {
-                signal == "WAIT" && signalScore < 40 ->
-                    "WEAK"
+        val strength = when {
 
-                signal == "WAIT" ->
-                    "MODERATE"
+            signal == "WAIT" && signalScore < 40 ->
+                "WEAK"
 
-                signalScore >= 85 ->
-                    "VERY STRONG"
+            signal == "WAIT" ->
+                "MODERATE"
 
-                signalScore >= 70 ->
-                    "STRONG"
+            signalScore >= 85 ->
+                "VERY STRONG"
 
-                signalScore >= 55 ->
-                    "GOOD"
+            signalScore >= 70 ->
+                "STRONG"
 
-                else ->
-                    "WEAK"
-            }
+            signalScore >= 55 ->
+                "GOOD"
 
-        /*
-         * Price action description
-         */
+            else ->
+                "WEAK"
+        }
+
         val pattern = when {
 
             strongBullishCandle ->
@@ -492,16 +562,14 @@ class MainActivity : Activity() {
             current.close < support ->
                 "Bearish Breakdown"
 
-            current.close > ema21 &&
-                    ema9 > ema21 ->
+            bullishTrend && current.close > ema21 ->
                 "Bullish Trend"
 
-            current.close < ema21 &&
-                    ema9 < ema21 ->
+            bearishTrend && current.close < ema21 ->
                 "Bearish Trend"
 
             else ->
-                "Mixed/Range"
+                "Mixed / Range"
         }
 
         return Analysis(
@@ -528,546 +596,300 @@ class MainActivity : Activity() {
             sellScore = sellScore,
             signal = signal,
             signalScore = signalScore,
-            strength = strength
+            strength = strength,
+            atr = atr,
+            demandZone = demandZone,
+            supplyZone = supplyZone,
+            demandConfirmation = demandConfirmation,
+            supplyConfirmation = supplyConfirmation
         )
     }
 
-    private fun updateUI(
-        symbol: String,
-        a: Analysis
-    ) {
+    // ==========================================
+    // COMBINED SUPPLY / DEMAND DETECTION
+    // ==========================================
 
-        val header = TextView(this)
+    private fun detectStrongZones(
+        candles: List<Candle>,
+        atr: Double
+    ): List<Zone> {
 
-        header.text =
-            if (symbol == "BTC/USD")
-                "BTC/USD (BITCOIN)"
-            else
-                "XAU/USD (GOLD)"
+        val result = ArrayList<Zone>()
 
-        header.textSize = 24f
-        header.setPadding(0, 30, 0, 15)
+        if (candles.size < 12 || atr <= 0) {
+            return result
+        }
 
-        container.addView(header)
+        // Analyze recent historical candidates.
+        val startIndex = max(2, candles.size - 40)
 
-        val price = TextView(this)
+        for (i in startIndex until candles.size - 2) {
 
-        price.text =
-            String.format(
-                Locale.US,
-                "5m Close: %.2f",
-                a.currentPrice
+            val base = candles[i]
+            val impulse = candles[i + 1]
+
+            val impulseRange = impulse.high - impulse.low
+
+            if (impulseRange <= 0) continue
+
+            val impulseBody =
+                abs(impulse.close - impulse.open)
+
+            val bodyRatio =
+                impulseBody / impulseRange
+
+            val beforeStart = max(0, i - 2)
+
+            val before = candles.subList(
+                beforeStart,
+                i
             )
 
-        price.textSize = 19f
-        price.setPadding(0, 5, 0, 15)
+            if (before.isEmpty()) continue
 
-        container.addView(price)
+            // Swing High / Swing Low
 
-        val signalText = TextView(this)
+            val swingHigh =
+                base.high >= before.maxOf { it.high } &&
+                        base.high > candles[i + 1].high
 
-        signalText.text =
-            "Signal: ${a.signal} | Score: ${a.signalScore}/100"
+            val swingLow =
+                base.low <= before.minOf { it.low } &&
+                        base.low < candles[i + 1].low
 
-        signalText.textSize = 22f
-        signalText.setPadding(0, 5, 0, 20)
+            // Base + Impulsive Move
 
-        container.addView(signalText)
+            val bullishImpulse =
+                impulse.close > impulse.open &&
+                        impulse.close > base.high &&
+                        bodyRatio >= 0.55 &&
+                        impulse.close - base.close >= atr * 0.60
 
-        val details = TextView(this)
+            val bearishImpulse =
+                impulse.close < impulse.open &&
+                        impulse.close < base.low &&
+                        bodyRatio >= 0.55 &&
+                        base.close - impulse.close >= atr * 0.60
 
-        val rsiZone =
-            when {
-                a.rsi >= 52 ->
-                    "BUY zone"
+            // ==================================
+            // DEMAND ZONE
+            // ==================================
 
-                a.rsi <= 48 ->
-                    "SELL zone"
+            if (bullishImpulse) {
 
-                else ->
-                    "Neutral zone"
-            }
+                val zoneLow = base.low
 
-        val emaDirection =
-            when {
-                a.ema9 > a.ema21 ->
-                    "Bullish ↑"
-
-                a.ema9 < a.ema21 ->
-                    "Bearish ↓"
-
-                else ->
-                    "Neutral"
-            }
-
-        val pricePosition =
-            when {
-                a.currentPrice > a.ema9 ->
-                    "Above EMA9"
-
-                a.currentPrice < a.ema9 ->
-                    "Below EMA9"
-
-                else ->
-                    "At EMA9"
-            }
-
-        val momentumText =
-            when {
-                a.momentumPositive ->
-                    "Positive"
-
-                a.momentumNegative ->
-                    "Negative"
-
-                else ->
-                    "Neutral"
-            }
-
-        val pullbackText =
-            when {
-                a.pullbackBullish ->
-                    "Bullish pullback confirmed"
-
-                a.pullbackBearish ->
-                    "Bearish pullback confirmed"
-
-                else ->
-                    "No fresh pullback"
-            }
-
-        val candleText =
-            when {
-                a.strongBullishCandle ->
-                    "Strong Bullish Body"
-
-                a.strongBearishCandle ->
-                    "Strong Bearish Body"
-
-                a.bullishCandle ->
-                    "Bullish"
-
-                a.bearishCandle ->
-                    "Bearish"
-
-                else ->
-                    "Neutral"
-            }
-
-        val liquidityText =
-            when {
-                a.sellSideSweep ->
-                    "Sell-side liquidity swept"
-
-                a.buySideSweep ->
-                    "Buy-side liquidity swept"
-
-                else ->
-                    "No liquidity sweep"
-            }
-
-        /*
-         * Correct percentage directions:
-         *
-         * Support is below current price.
-         * Resistance is above current price.
-         */
-        val supportPercent =
-            if (a.currentPrice != 0.0)
-                abs(a.currentPrice - a.support) /
-                        a.currentPrice * 100.0
-            else 0.0
-
-        val resistancePercent =
-            if (a.currentPrice != 0.0)
-                abs(a.resistance - a.currentPrice) /
-                        a.currentPrice * 100.0
-            else 0.0
-
-        val supportDirection =
-            when {
-                a.support < a.currentPrice ->
-                    "below"
-
-                a.support > a.currentPrice ->
-                    "above"
-
-                else ->
-                    "at price"
-            }
-
-        val resistanceDirection =
-            when {
-                a.resistance > a.currentPrice ->
-                    "above"
-
-                a.resistance < a.currentPrice ->
-                    "below"
-
-                else ->
-                    "at price"
-            }
-
-        details.text =
-            """
-            
-Confirmation Details:
-5m Candle: ${a.candleTime}
-EMA 9/21: $emaDirection
-EMA Strength: $emaDirection
-Price Position: $pricePosition
-RSI 14: ${String.format(Locale.US, "%.1f", a.rsi)} ($rsiZone)
-Momentum: $momentumText
-Pullback: $pullbackText
-Candle: $candleText
-
-PRICE ACTION:
-Pattern: ${a.pattern}
-Structure: ${a.structure}
-
-Support: ${
-                String.format(
-                    Locale.US,
-                    "%.2f",
-                    a.support
-                )
-            } (${
-                String.format(
-                    Locale.US,
-                    "%.2f",
-                    supportPercent
-                )
-            }% $supportDirection)
-
-Resistance: ${
-                String.format(
-                    Locale.US,
-                    "%.2f",
-                    a.resistance
-                )
-            } (${
-                String.format(
-                    Locale.US,
-                    "%.2f",
-                    resistancePercent
-                )
-            }% $resistanceDirection)
-
-Liquidity: $liquidityText
-
-BUY Score: ${a.buyScore}/100
-SELL Score: ${a.sellScore}/100
-Signal: ${a.signal}
-Signal Strength: ${a.signalScore}/100
-Strength: ${a.strength}
-
-            """.trimIndent()
-
-        details.textSize = 16f
-
-        details.setPadding(
-            0,
-            0,
-            0,
-            25
-        )
-
-        container.addView(details)
-
-        /*
-         * Notification only when a real BUY/SELL appears.
-         */
-        if (a.signal == "BUY" || a.signal == "SELL") {
-
-            val lastSignal =
-                if (symbol == "BTC/USD")
-                    lastBtcSignal
-                else
-                    lastGoldSignal
-
-            if (a.signal != lastSignal) {
-
-                sendNotification(
-                    symbol,
-                    a.signal,
-                    a.signalScore
+                val zoneHigh = max(
+                    base.open,
+                    base.close
                 )
 
-                if (symbol == "BTC/USD") {
-                    lastBtcSignal = a.signal
-                } else {
-                    lastGoldSignal = a.signal
+                if (zoneHigh <= zoneLow) continue
+
+                val displacement =
+                    (impulse.close - base.close) / atr
+
+                var score = 30
+
+                if (swingLow) score += 25
+
+                if (displacement >= 1.20) {
+                    score += 20
+                } else if (displacement >= 0.80) {
+                    score += 12
+                }
+
+                val laterCandles =
+                    candles.subList(
+                        i + 2,
+                        candles.size
+                    )
+
+                val retests = laterCandles.count {
+                    it.low <= zoneHigh &&
+                            it.high >= zoneLow
+                }
+
+                val invalid =
+                    laterCandles.any {
+                        it.close < zoneLow - atr * 0.10
+                    }
+
+                val cleanMove =
+                    laterCandles.take(3).none {
+                        it.close < zoneLow
+                    }
+
+                if (retests == 0) score += 15
+                else if (retests == 1) score += 8
+
+                if (cleanMove) score += 10
+
+                if (!invalid) {
+
+                    score = score.coerceIn(0, 100)
+
+                    if (score >= STRONG_ZONE_MIN_SCORE) {
+
+                        result.add(
+                            Zone(
+                                type = "DEMAND",
+                                low = zoneLow,
+                                high = zoneHigh,
+                                strength = score,
+                                fresh = retests == 0,
+                                retests = retests,
+                                createdAt = base.time
+                            )
+                        )
+                    }
+                }
+            }
+
+            // ==================================
+            // SUPPLY ZONE
+            // ==================================
+
+            if (bearishImpulse) {
+
+                val zoneLow = min(
+                    base.open,
+                    base.close
+                )
+
+                val zoneHigh = base.high
+
+                if (zoneHigh <= zoneLow) continue
+
+                val displacement =
+                    (base.close - impulse.close) / atr
+
+                var score = 30
+
+                if (swingHigh) score += 25
+
+                if (displacement >= 1.20) {
+                    score += 20
+                } else if (displacement >= 0.80) {
+                    score += 12
+                }
+
+                val laterCandles =
+                    candles.subList(
+                        i + 2,
+                        candles.size
+                    )
+
+                val retests = laterCandles.count {
+                    it.high >= zoneLow &&
+                            it.low <= zoneHigh
+                }
+
+                val invalid =
+                    laterCandles.any {
+                        it.close > zoneHigh + atr * 0.10
+                    }
+
+                val cleanMove =
+                    laterCandles.take(3).none {
+                        it.close > zoneHigh
+                    }
+
+                if (retests == 0) score += 15
+                else if (retests == 1) score += 8
+
+                if (cleanMove) score += 10
+
+                if (!invalid) {
+
+                    score = score.coerceIn(0, 100)
+
+                    if (score >= STRONG_ZONE_MIN_SCORE) {
+
+                        result.add(
+                            Zone(
+                                type = "SUPPLY",
+                                low = zoneLow,
+                                high = zoneHigh,
+                                strength = score,
+                                fresh = retests == 0,
+                                retests = retests,
+                                createdAt = base.time
+                            )
+                        )
+                    }
                 }
             }
         }
+
+        // Remove duplicate / overlapping zones.
+
+        return result
+            .sortedByDescending { it.strength }
+            .distinctBy {
+                "${it.type}_${(it.low * 100).toLong()}_${(it.high * 100).toLong()}"
+            }
     }
 
-    private fun showError(
-        symbol: String,
-        message: String
-    ) {
+    private fun zoneDistance(
+        price: Double,
+        zone: Zone
+    ): Double {
 
-        val header = TextView(this)
+        return when {
 
-        header.text =
-            if (symbol == "BTC/USD")
-                "BTC/USD (BITCOIN)"
-            else
-                "XAU/USD (GOLD)"
+            price in zone.low..zone.high ->
+                0.0
 
-        header.textSize = 24f
-        header.setPadding(0, 30, 0, 10)
+            price < zone.low ->
+                zone.low - price
 
-        container.addView(header)
-
-        val error = TextView(this)
-
-        error.text =
-            """
-            Price: --
-            Signal: WAIT
-            
-            $message
-            """.trimIndent()
-
-        error.textSize = 17f
-
-        error.setPadding(
-            0,
-            0,
-            0,
-            25
-        )
-
-        container.addView(error)
+            else ->
+                price - zone.high
+        }
     }
 
-    private fun calculateEMA(
-        values: List<Double>,
+    private fun zoneDistancePercent(
+        price: Double,
+        zone: Zone
+    ): Double {
+
+        if (price <= 0) return 999.0
+
+        return zoneDistance(price, zone) /
+                price * 100.0
+    }
+
+    // ==========================================
+    // ATR
+    // ==========================================
+
+    private fun calculateATR(
+        candles: List<Candle>,
         period: Int
     ): Double {
 
-        if (values.size < period) {
-            return values.last()
-        }
+        if (candles.size < 2) return 0.0
 
-        val multiplier =
-            2.0 / (period + 1)
+        val start = max(1, candles.size - period)
 
-        var ema =
-            values.take(period).average()
+        val ranges = ArrayList<Double>()
 
-        for (i in period until values.size) {
+        for (i in start until candles.size) {
 
-            ema =
-                (values[i] - ema) *
-                        multiplier +
-                        ema
-        }
+            val current = candles[i]
+            val previous = candles[i - 1]
 
-        return ema
-    }
-
-    private fun calculateRSI(
-        closes: List<Double>,
-        period: Int
-    ): Double {
-
-        if (closes.size <= period) {
-            return 50.0
-        }
-
-        var gains = 0.0
-        var losses = 0.0
-
-        for (i in 1..period) {
-
-            val change =
-                closes[i] - closes[i - 1]
-
-            if (change > 0) {
-                gains += change
-            } else {
-                losses += abs(change)
-            }
-        }
-
-        var averageGain =
-            gains / period
-
-        var averageLoss =
-            losses / period
-
-        for (i in period + 1 until closes.size) {
-
-            val change =
-                closes[i] - closes[i - 1]
-
-            val gain =
-                if (change > 0) change else 0.0
-
-            val loss =
-                if (change < 0) abs(change) else 0.0
-
-            averageGain =
-                (averageGain * (period - 1) + gain) /
-                        period
-
-            averageLoss =
-                (averageLoss * (period - 1) + loss) /
-                        period
-        }
-
-        if (averageLoss == 0.0) {
-            return 100.0
-        }
-
-        val rs =
-            averageGain / averageLoss
-
-        return 100.0 - (100.0 / (1.0 + rs))
-    }
-
-    private fun createNotificationChannel() {
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-
-            val channel =
-                NotificationChannel(
-                    "trading_signal_channel",
-                    "Trading Signals",
-                    NotificationManager.IMPORTANCE_HIGH
+            val trueRange = max(
+                current.high - current.low,
+                max(
+                    abs(current.high - previous.close),
+                    abs(current.low - previous.close)
                 )
-
-            channel.description =
-                "BUY and SELL trading signal notifications"
-
-            val manager =
-                getSystemService(
-                    Context.NOTIFICATION_SERVICE
-                ) as NotificationManager
-
-            manager.createNotificationChannel(channel)
-        }
-    }
-
-    private fun requestNotificationPermission() {
-
-        if (
-            Build.VERSION.SDK_INT >=
-            Build.VERSION_CODES.TIRAMISU
-        ) {
-
-            if (
-                checkSelfPermission(
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-
-                ActivityCompat.requestPermissions(
-                    this,
-                    arrayOf(
-                        Manifest.permission.POST_NOTIFICATIONS
-                    ),
-                    1001
-                )
-            }
-        }
-    }
-
-    private fun sendNotification(
-        symbol: String,
-        signal: String,
-        score: Int
-    ) {
-
-        if (
-            Build.VERSION.SDK_INT >=
-            Build.VERSION_CODES.TIRAMISU
-        ) {
-
-            if (
-                checkSelfPermission(
-                    Manifest.permission.POST_NOTIFICATIONS
-                ) != PackageManager.PERMISSION_GRANTED
-            ) {
-                return
-            }
-        }
-
-        val manager =
-            getSystemService(
-                Context.NOTIFICATION_SERVICE
-            ) as NotificationManager
-
-        val notification =
-            NotificationCompat.Builder(
-                this,
-                "trading_signal_channel"
             )
-                .setSmallIcon(
-                    android.R.drawable.ic_dialog_info
-                )
-                .setContentTitle(
-                    "$symbol $signal SIGNAL"
-                )
-                .setContentText(
-                    "Signal strength: $score/100"
-                )
-                .setPriority(
-                    NotificationCompat.PRIORITY_HIGH
-                )
-                .setAutoCancel(true)
-                .build()
 
-        manager.notify(
-            if (symbol == "BTC/USD") 101 else 102,
-            notification
-        )
+            ranges.add(trueRange)
+        }
+
+        return if (ranges.isEmpty()) 0.0 else ranges.average()
     }
-
-    data class Candle(
-        val time: String,
-        val open: Double,
-        val high: Double,
-        val low: Double,
-        val close: Double
-    )
-
-    data class Analysis(
-        val currentPrice: Double,
-        val candleTime: String,
-
-        val ema9: Double,
-        val ema21: Double,
-        val rsi: Double,
-
-        val momentumPositive: Boolean,
-        val momentumNegative: Boolean,
-
-        val pullbackBullish: Boolean,
-        val pullbackBearish: Boolean,
-
-        val bullishCandle: Boolean,
-        val bearishCandle: Boolean,
-
-        val strongBullishCandle: Boolean,
-        val strongBearishCandle: Boolean,
-
-        val support: Double,
-        val resistance: Double,
-
-        val sellSideSweep: Boolean,
-        val buySideSweep: Boolean,
-
-        val pattern: String,
-        val structure: String,
-
-        val buyScore: Int,
-        val sellScore: Int,
-
-        val signal: String,
-        val signalScore: Int,
-        val strength: String
-    )
-}
