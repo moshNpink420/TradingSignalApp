@@ -893,3 +893,569 @@ class MainActivity : Activity() {
 
         return if (ranges.isEmpty()) 0.0 else ranges.average()
     }
+
+    // ==========================================
+    // USER INTERFACE
+    // ==========================================
+
+    private fun updateUI(a: Analysis) {
+
+        refreshScreen()
+
+        addText("XAU/USD (GOLD)", 24f)
+
+        addText(
+            String.format(
+                Locale.US,
+                "5M Close: %.2f",
+                a.currentPrice
+            ),
+            21f
+        )
+
+        addText(
+            "Signal: ${a.signal} | ${a.signalScore}/100",
+            23f
+        )
+
+        addText(
+            "Strength: ${a.strength}",
+            19f
+        )
+
+        addText(
+            """
+            MARKET ANALYSIS
+
+            Candle Time: ${a.candleTime}
+
+            EMA 9: ${formatPrice(a.ema9)}
+            EMA 21: ${formatPrice(a.ema21)}
+
+            EMA Direction: ${
+                if (a.ema9 > a.ema21) "Bullish"
+                else if (a.ema9 < a.ema21) "Bearish"
+                else "Neutral"
+            }
+
+            RSI 14: ${formatPrice(a.rsi)}
+            Momentum: ${
+                if (a.momentumPositive) "Positive"
+                else if (a.momentumNegative) "Negative"
+                else "Neutral"
+            }
+
+            Pullback:
+            ${
+                if (a.pullbackBullish) "Bullish Confirmed"
+                else if (a.pullbackBearish) "Bearish Confirmed"
+                else "No Fresh Pullback"
+            }
+
+            Candle:
+            ${a.pattern}
+
+            Price Structure:
+            ${a.structure}
+            """.trimIndent(),
+            16f
+        )
+
+        // ======================================
+        // SUPPLY / DEMAND DISPLAY
+        // ======================================
+
+        addText("SUPPLY / DEMAND ZONES", 21f)
+
+        if (a.demandZone != null) {
+
+            val z = a.demandZone
+
+            addText(
+                """
+                DEMAND ZONE
+                BUY AREA
+
+                Low: ${formatPrice(z.low)}
+                High: ${formatPrice(z.high)}
+
+                Strength: ${z.strength}/100
+                Status: ${if (z.fresh) "FRESH" else "TESTED"}
+                Retests: ${z.retests}
+                Created: ${z.createdAt}
+
+                Distance: ${
+                    formatPrice(
+                        zoneDistance(
+                            a.currentPrice,
+                            z
+                        )
+                    )
+                }
+
+                Confirmation: ${
+                    if (a.demandConfirmation)
+                        "BULLISH CONFIRMED"
+                    else
+                        "Waiting for confirmation"
+                }
+                """.trimIndent(),
+                16f
+            )
+
+        } else {
+
+            addText(
+                "DEMAND ZONE: No Strong Zone Found",
+                16f
+            )
+        }
+
+        if (a.supplyZone != null) {
+
+            val z = a.supplyZone
+
+            addText(
+                """
+                SUPPLY ZONE
+                SELL AREA
+
+                Low: ${formatPrice(z.low)}
+                High: ${formatPrice(z.high)}
+
+                Strength: ${z.strength}/100
+                Status: ${if (z.fresh) "FRESH" else "TESTED"}
+                Retests: ${z.retests}
+                Created: ${z.createdAt}
+
+                Distance: ${
+                    formatPrice(
+                        zoneDistance(
+                            a.currentPrice,
+                            z
+                        )
+                    )
+                }
+
+                Confirmation: ${
+                    if (a.supplyConfirmation)
+                        "BEARISH CONFIRMED"
+                    else
+                        "Waiting for confirmation"
+                }
+                """.trimIndent(),
+                16f
+            )
+
+        } else {
+
+            addText(
+                "SUPPLY ZONE: No Strong Zone Found",
+                16f
+            )
+        }
+
+        addText(
+            """
+            Zone Detection:
+            Combined Swing + Impulsive Move
+
+            Minimum Strong Zone:
+            $STRONG_ZONE_MIN_SCORE/100
+
+            Display:
+            Strong Zones Only
+            """.trimIndent(),
+            15f
+        )
+
+        // ======================================
+        // SUPPORT / RESISTANCE
+        // ======================================
+
+        val supportPercent =
+            abs(a.currentPrice - a.support) /
+                    a.currentPrice * 100.0
+
+        val resistancePercent =
+            abs(a.resistance - a.currentPrice) /
+                    a.currentPrice * 100.0
+
+        addText(
+            """
+            SUPPORT / RESISTANCE
+
+            Support: ${formatPrice(a.support)}
+            Distance: ${formatPrice(supportPercent)}% below
+
+            Resistance: ${formatPrice(a.resistance)}
+            Distance: ${formatPrice(resistancePercent)}% above
+            """.trimIndent(),
+            16f
+        )
+
+        // ======================================
+        // LIQUIDITY
+        // ======================================
+
+        val liquidityText = when {
+
+            a.sellSideSweep ->
+                "Sell-side Liquidity Swept"
+
+            a.buySideSweep ->
+                "Buy-side Liquidity Swept"
+
+            else ->
+                "No Liquidity Sweep"
+        }
+
+        addText(
+            """
+            LIQUIDITY ANALYSIS
+
+            $liquidityText
+            """.trimIndent(),
+            16f
+        )
+
+        // ======================================
+        // FINAL SCORE
+        // ======================================
+
+        addText(
+            """
+            FINAL SIGNAL ANALYSIS
+
+            BUY Score: ${a.buyScore}/100
+            SELL Score: ${a.sellScore}/100
+
+            Final Signal: ${a.signal}
+            Signal Score: ${a.signalScore}/100
+            Signal Strength: ${a.strength}
+            """.trimIndent(),
+            19f
+        )
+
+        // ======================================
+        // NOTIFICATION
+        // ======================================
+
+        if (a.signal == "BUY" || a.signal == "SELL") {
+
+            if (a.signal != lastGoldSignal) {
+
+                sendNotification(
+                    SYMBOL,
+                    a.signal,
+                    a.signalScore
+                )
+
+                lastGoldSignal = a.signal
+            }
+
+        } else {
+
+            lastGoldSignal = ""
+        }
+    }
+
+    private fun addText(
+        text: String,
+        size: Float
+    ) {
+
+        val view = TextView(this)
+
+        view.text = text
+        view.textSize = size
+
+        view.setPadding(
+            0,
+            10,
+            0,
+            18
+        )
+
+        container.addView(
+            view,
+            LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            )
+        )
+    }
+
+    private fun formatPrice(value: Double): String {
+
+        return String.format(
+            Locale.US,
+            "%.2f",
+            value
+        )
+    }
+
+    private fun showError(message: String) {
+
+        refreshScreen()
+
+        addText("XAU/USD (GOLD)", 24f)
+
+        addText(
+            """
+            Price: --
+            Signal: WAIT
+
+            $message
+
+            Next update:
+            Approximately 5 minutes
+            """.trimIndent(),
+            17f
+        )
+    }
+
+    // ==========================================
+    // EMA
+    // ==========================================
+
+    private fun calculateEMA(
+        values: List<Double>,
+        period: Int
+    ): Double {
+
+        if (values.size < period) {
+            return values.last()
+        }
+
+        val multiplier = 2.0 / (period + 1)
+
+        var ema = values.take(period).average()
+
+        for (i in period until values.size) {
+
+            ema =
+                (values[i] - ema) *
+                        multiplier +
+                        ema
+        }
+
+        return ema
+    }
+
+    // ==========================================
+    // RSI
+    // ==========================================
+
+    private fun calculateRSI(
+        closes: List<Double>,
+        period: Int
+    ): Double {
+
+        if (closes.size <= period) return 50.0
+
+        var gains = 0.0
+        var losses = 0.0
+
+        for (i in 1..period) {
+
+            val change = closes[i] - closes[i - 1]
+
+            if (change > 0) {
+                gains += change
+            } else {
+                losses += abs(change)
+            }
+        }
+
+        var averageGain = gains / period
+        var averageLoss = losses / period
+
+        for (i in period + 1 until closes.size) {
+
+            val change = closes[i] - closes[i - 1]
+
+            val gain = if (change > 0) change else 0.0
+            val loss = if (change < 0) abs(change) else 0.0
+
+            averageGain =
+                (averageGain * (period - 1) + gain) /
+                        period
+
+            averageLoss =
+                (averageLoss * (period - 1) + loss) /
+                        period
+        }
+
+        if (averageLoss == 0.0) return 100.0
+
+        val rs = averageGain / averageLoss
+
+        return 100.0 - (100.0 / (1.0 + rs))
+    }
+
+    // ==========================================
+    // NOTIFICATION CHANNEL
+    // ==========================================
+
+    private fun createNotificationChannel() {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+
+            val channel = NotificationChannel(
+                "trading_signal_channel",
+                "Trading Signals",
+                NotificationManager.IMPORTANCE_HIGH
+            )
+
+            channel.description =
+                "Gold BUY and SELL trading notifications"
+
+            val manager =
+                getSystemService(
+                    Context.NOTIFICATION_SERVICE
+                ) as NotificationManager
+
+            manager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun requestNotificationPermission() {
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+            if (
+                checkSelfPermission(
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+
+                ActivityCompat.requestPermissions(
+                    this,
+                    arrayOf(
+                        Manifest.permission.POST_NOTIFICATIONS
+                    ),
+                    1001
+                )
+            }
+        }
+    }
+
+    private fun sendNotification(
+        symbol: String,
+        signal: String,
+        score: Int
+    ) {
+
+        if (
+            Build.VERSION.SDK_INT >=
+            Build.VERSION_CODES.TIRAMISU
+        ) {
+
+            if (
+                checkSelfPermission(
+                    Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                return
+            }
+        }
+
+        val manager =
+            getSystemService(
+                Context.NOTIFICATION_SERVICE
+            ) as NotificationManager
+
+        val notification =
+            NotificationCompat.Builder(
+                this,
+                "trading_signal_channel"
+            )
+                .setSmallIcon(
+                    android.R.drawable.ic_dialog_info
+                )
+                .setContentTitle(
+                    "$symbol $signal SIGNAL"
+                )
+                .setContentText(
+                    "Signal Strength: $score/100"
+                )
+                .setPriority(
+                    NotificationCompat.PRIORITY_HIGH
+                )
+                .setAutoCancel(true)
+                .build()
+
+        manager.notify(
+            102,
+            notification
+        )
+    }
+
+    // ==========================================
+    // DATA CLASSES
+    // ==========================================
+
+    data class Candle(
+        val time: String,
+        val open: Double,
+        val high: Double,
+        val low: Double,
+        val close: Double
+    )
+
+    data class Zone(
+        val type: String,
+        val low: Double,
+        val high: Double,
+        val strength: Int,
+        val fresh: Boolean,
+        val retests: Int,
+        val createdAt: String
+    )
+
+    data class Analysis(
+        val currentPrice: Double,
+        val candleTime: String,
+
+        val ema9: Double,
+        val ema21: Double,
+        val rsi: Double,
+
+        val momentumPositive: Boolean,
+        val momentumNegative: Boolean,
+
+        val pullbackBullish: Boolean,
+        val pullbackBearish: Boolean,
+
+        val bullishCandle: Boolean,
+        val bearishCandle: Boolean,
+
+        val strongBullishCandle: Boolean,
+        val strongBearishCandle: Boolean,
+
+        val support: Double,
+        val resistance: Double,
+
+        val sellSideSweep: Boolean,
+        val buySideSweep: Boolean,
+
+        val pattern: String,
+        val structure: String,
+
+        val buyScore: Int,
+        val sellScore: Int,
+
+        val signal: String,
+        val signalScore: Int,
+        val strength: String,
+
+        val atr: Double,
+
+        val demandZone: Zone?,
+        val supplyZone: Zone?,
+
+        val demandConfirmation: Boolean,
+        val supplyConfirmation: Boolean
+    )
+}
